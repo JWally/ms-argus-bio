@@ -2,9 +2,7 @@ import * as tf from '@tensorflow/tfjs';
 
 let cachedModel: tf.LayersModel | null = null;
 
-export async function loadModel(
-  onProgress?: (msg: string) => void
-): Promise<tf.LayersModel> {
+export async function loadModel(onProgress?: (msg: string) => void): Promise<tf.LayersModel> {
   if (cachedModel) return cachedModel;
 
   onProgress?.('Loading pre-trained model...');
@@ -61,17 +59,7 @@ function preprocessCanvas(canvas: HTMLCanvasElement): tf.Tensor4D {
   const outCtx = outCanvas.getContext('2d')!;
   outCtx.fillStyle = 'black';
   outCtx.fillRect(0, 0, 28, 28);
-  outCtx.drawImage(
-    canvas,
-    cx - size / 2,
-    cy - size / 2,
-    size,
-    size,
-    2,
-    2,
-    24,
-    24
-  );
+  outCtx.drawImage(canvas, cx - size / 2, cy - size / 2, size, size, 2, 2, 24, 24);
 
   const outData = outCtx.getImageData(0, 0, 28, 28);
   const tensor = tf.browser.fromPixels(outData, 1);
@@ -101,7 +89,10 @@ export function getImageData28x28(canvas: HTMLCanvasElement): number[] {
   const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
   const { data, width, height } = imageData;
 
-  let minX = width, minY = height, maxX = 0, maxY = 0;
+  let minX = width,
+    minY = height,
+    maxX = 0,
+    maxY = 0;
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       if (data[(y * width + x) * 4] > 20) {

@@ -1,0 +1,9 @@
+{
+  "threshold": 5,
+  "reporters": ["console"],
+  "ignore": ["node_modules", "dist", "cdk.out", "coverage", "**/*.test.ts"],
+  "absolute": true,
+  "format": ["typescript", "tsx"],
+  "minLines": 5,
+  "minTokens": 50
+}

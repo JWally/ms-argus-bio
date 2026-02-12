@@ -2,12 +2,9 @@
 // Thin wrapper around @qdrant/js-client-rest with AWS Secrets Manager auth
 // Adapted from ms-argus-api/src/services/vector/qdrant-client.ts
 
-import { QdrantClient as OfficialClient } from "@qdrant/js-client-rest";
-import {
-  SecretsManagerClient,
-  GetSecretValueCommand,
-} from "@aws-sdk/client-secrets-manager";
-import type { Logger } from "@aws-lambda-powertools/logger";
+import { QdrantClient as OfficialClient } from '@qdrant/js-client-rest';
+import { SecretsManagerClient, GetSecretValueCommand } from '@aws-sdk/client-secrets-manager';
+import type { Logger } from '@aws-lambda-powertools/logger';
 
 export interface QdrantClientConfig {
   baseUrl: string;
@@ -55,10 +52,7 @@ export class QdrantClient {
     this.secretsClient = config.secretsClient ?? new SecretsManagerClient({});
   }
 
-  async search(
-    collection: string,
-    request: VectorSearchRequest,
-  ): Promise<VectorSearchResult[]> {
+  async search(collection: string, request: VectorSearchRequest): Promise<VectorSearchResult[]> {
     const client = await this.getClient();
     const results = await client.search(collection, {
       vector: request.vector,
@@ -70,10 +64,7 @@ export class QdrantClient {
     return results as VectorSearchResult[];
   }
 
-  async upsert(
-    collection: string,
-    request: VectorUpsertRequest,
-  ): Promise<void> {
+  async upsert(collection: string, request: VectorUpsertRequest): Promise<void> {
     const client = await this.getClient();
     await client.upsert(collection, { points: request.points });
   }
@@ -87,8 +78,8 @@ export class QdrantClient {
   async createCollection(
     collection: string,
     options: {
-      vectors: { size: number; distance: "Cosine" | "Euclid" | "Dot" };
-    },
+      vectors: { size: number; distance: 'Cosine' | 'Euclid' | 'Dot' };
+    }
   ): Promise<void> {
     const client = await this.getClient();
     await client.createCollection(collection, options);
@@ -99,9 +90,7 @@ export class QdrantClient {
     await client.deleteCollection(collection);
   }
 
-  async collectionInfo(
-    collection: string,
-  ): Promise<{ points_count: number; status: string }> {
+  async collectionInfo(collection: string): Promise<{ points_count: number; status: string }> {
     const client = await this.getClient();
     const info = await client.getCollection(collection);
     return {
@@ -129,10 +118,10 @@ export class QdrantClient {
     }
 
     const response = await this.secretsClient.send(
-      new GetSecretValueCommand({ SecretId: this.config.secretArn }),
+      new GetSecretValueCommand({ SecretId: this.config.secretArn })
     );
     if (!response.SecretString) {
-      throw new Error("Qdrant API key secret is empty");
+      throw new Error('Qdrant API key secret is empty');
     }
 
     this.cachedApiKey = response.SecretString;

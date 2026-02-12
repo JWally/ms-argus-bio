@@ -1,7 +1,7 @@
 // server/embedding.ts
 // BiometricPayload → 64d vector encoding
 
-import type { BiometricPayload, NormalizedStroke } from "./types";
+import type { BiometricPayload, NormalizedStroke } from './types';
 
 const EMBEDDING_DIMS = 64;
 
@@ -12,6 +12,7 @@ function norm(value: number, min: number, max: number): number {
 }
 
 /** Compute per-digit stroke shape features (5 per digit) */
+// eslint-disable-next-line complexity, sonarjs/cognitive-complexity
 function digitShapeFeatures(strokes: NormalizedStroke[]): number[] {
   if (strokes.length === 0 || strokes.every((s) => s.points.length < 2)) {
     return [0, 0, 0, 0, 0];
@@ -86,13 +87,10 @@ function digitShapeFeatures(strokes: NormalizedStroke[]): number[] {
     return len;
   });
   const avgLen =
-    strokeLengths.length > 0
-      ? strokeLengths.reduce((a, b) => a + b, 0) / strokeLengths.length
-      : 0;
+    strokeLengths.length > 0 ? strokeLengths.reduce((a, b) => a + b, 0) / strokeLengths.length : 0;
   const strokeLengthVariance =
     strokeLengths.length > 0
-      ? strokeLengths.reduce((s, v) => s + (v - avgLen) ** 2, 0) /
-        strokeLengths.length
+      ? strokeLengths.reduce((s, v) => s + (v - avgLen) ** 2, 0) / strokeLengths.length
       : 0;
 
   return [avgCurvature, directionChanges, aspectRatio, coverageRatio, strokeLengthVariance];
@@ -102,6 +100,7 @@ function digitShapeFeatures(strokes: NormalizedStroke[]): number[] {
  * Encode a BiometricPayload into a 64-dimensional feature vector.
  * All features are min-max normalized to [0, 1].
  */
+// eslint-disable-next-line complexity, sonarjs/cognitive-complexity
 export function encode(payload: BiometricPayload): number[] {
   const f = payload.features;
   const vec: number[] = [];
@@ -132,8 +131,8 @@ export function encode(payload: BiometricPayload): number[] {
         norm(
           d.strokes.reduce((s, st) => s + st.points.length, 0),
           0,
-          2000,
-        ),
+          2000
+        )
       );
       // Per-digit avg speed
       let digitSpeed = 0;
@@ -143,9 +142,9 @@ export function encode(payload: BiometricPayload): number[] {
           const p0 = stroke.points[j - 1];
           const p1 = stroke.points[j];
           const dt = p1.t - p0.t;
+          // eslint-disable-next-line max-depth
           if (dt > 0) {
-            digitSpeed +=
-              Math.sqrt((p1.x - p0.x) ** 2 + (p1.y - p0.y) ** 2) / dt;
+            digitSpeed += Math.sqrt((p1.x - p0.x) ** 2 + (p1.y - p0.y) ** 2) / dt;
             speedCount++;
           }
         }
@@ -159,16 +158,12 @@ export function encode(payload: BiometricPayload): number[] {
   // ── Dims 28-32: Timing features (5d) ──
   const digitTimes = payload.digits.map((d) => d.timeMs);
   const avgDigitTime =
-    digitTimes.length > 0
-      ? digitTimes.reduce((a, b) => a + b, 0) / digitTimes.length
-      : 0;
+    digitTimes.length > 0 ? digitTimes.reduce((a, b) => a + b, 0) / digitTimes.length : 0;
   const timeVariance =
     digitTimes.length > 0
-      ? digitTimes.reduce((s, v) => s + (v - avgDigitTime) ** 2, 0) /
-        digitTimes.length
+      ? digitTimes.reduce((s, v) => s + (v - avgDigitTime) ** 2, 0) / digitTimes.length
       : 0;
-  const fastestDigitRatio =
-    avgDigitTime > 0 ? Math.min(...digitTimes) / avgDigitTime : 0;
+  const fastestDigitRatio = avgDigitTime > 0 ? Math.min(...digitTimes) / avgDigitTime : 0;
 
   vec.push(norm(payload.completionTimeMs, 0, 45000));
   vec.push(payload.passed ? 1 : 0);
@@ -182,26 +177,18 @@ export function encode(payload: BiometricPayload): number[] {
   for (let i = 1; i < timeline.length; i++) {
     const dt = timeline[i].t - timeline[i - 1].t;
     if (dt > 0 && timeline[i].digitIndex === timeline[i - 1].digitIndex) {
-      rampRates.push(
-        (timeline[i].targetConf - timeline[i - 1].targetConf) / dt,
-      );
+      rampRates.push((timeline[i].targetConf - timeline[i - 1].targetConf) / dt);
     }
   }
   const avgRampRate =
-    rampRates.length > 0
-      ? rampRates.reduce((a, b) => a + b, 0) / rampRates.length
-      : 0;
-  const finalConf =
-    timeline.length > 0 ? timeline[timeline.length - 1].targetConf : 0;
+    rampRates.length > 0 ? rampRates.reduce((a, b) => a + b, 0) / rampRates.length : 0;
+  const finalConf = timeline.length > 0 ? timeline[timeline.length - 1].targetConf : 0;
   const confValues = timeline.map((s) => s.targetConf);
   const avgConf =
-    confValues.length > 0
-      ? confValues.reduce((a, b) => a + b, 0) / confValues.length
-      : 0;
+    confValues.length > 0 ? confValues.reduce((a, b) => a + b, 0) / confValues.length : 0;
   const confVariance =
     confValues.length > 0
-      ? confValues.reduce((s, v) => s + (v - avgConf) ** 2, 0) /
-        confValues.length
+      ? confValues.reduce((s, v) => s + (v - avgConf) ** 2, 0) / confValues.length
       : 0;
   const firstHighConf = timeline.find((s) => s.targetConf >= 0.9);
   const timeToFirstHighConf = firstHighConf ? firstHighConf.t : 45000;
@@ -222,10 +209,7 @@ export function encode(payload: BiometricPayload): number[] {
     const gap = allStrokes[i].startTime - allStrokes[i - 1].endTime;
     if (gap > 0) totalPauseTime += gap;
   }
-  const totalTime =
-    allPoints.length >= 2
-      ? allPoints[allPoints.length - 1].t - allPoints[0].t
-      : 1;
+  const totalTime = allPoints.length >= 2 ? allPoints[allPoints.length - 1].t - allPoints[0].t : 1;
   const pauseRatio = totalTime > 0 ? totalPauseTime / totalTime : 0;
 
   // Speed acceleration pattern: ratio of speed in first half vs second half
@@ -236,23 +220,17 @@ export function encode(payload: BiometricPayload): number[] {
       const p1 = stroke.points[i];
       const dt = p1.t - p0.t;
       if (dt > 0) {
-        speeds.push(
-          Math.sqrt((p1.x - p0.x) ** 2 + (p1.y - p0.y) ** 2) / dt,
-        );
+        speeds.push(Math.sqrt((p1.x - p0.x) ** 2 + (p1.y - p0.y) ** 2) / dt);
       }
     }
   }
   const half = Math.floor(speeds.length / 2);
-  const firstHalfAvg =
-    half > 0
-      ? speeds.slice(0, half).reduce((a, b) => a + b, 0) / half
-      : 0;
+  const firstHalfAvg = half > 0 ? speeds.slice(0, half).reduce((a, b) => a + b, 0) / half : 0;
   const secondHalfAvg =
     speeds.length - half > 0
       ? speeds.slice(half).reduce((a, b) => a + b, 0) / (speeds.length - half)
       : 0;
-  const speedAccelPattern =
-    firstHalfAvg > 0 ? secondHalfAvg / firstHalfAvg : 1;
+  const speedAccelPattern = firstHalfAvg > 0 ? secondHalfAvg / firstHalfAvg : 1;
 
   // Rhythm consistency: variance of inter-stroke intervals
   const intervals: number[] = [];
@@ -260,15 +238,10 @@ export function encode(payload: BiometricPayload): number[] {
     intervals.push(allStrokes[i].startTime - allStrokes[i - 1].endTime);
   }
   const avgInterval =
-    intervals.length > 0
-      ? intervals.reduce((a, b) => a + b, 0) / intervals.length
-      : 0;
+    intervals.length > 0 ? intervals.reduce((a, b) => a + b, 0) / intervals.length : 0;
   const rhythmConsistency =
     intervals.length > 0
-      ? Math.sqrt(
-          intervals.reduce((s, v) => s + (v - avgInterval) ** 2, 0) /
-            intervals.length,
-        )
+      ? Math.sqrt(intervals.reduce((s, v) => s + (v - avgInterval) ** 2, 0) / intervals.length)
       : 0;
 
   // Timing entropy: Shannon entropy of time intervals binned into 10 bins
@@ -282,10 +255,7 @@ export function encode(payload: BiometricPayload): number[] {
       const bin =
         maxInt === minInt
           ? 0
-          : Math.min(
-              binCount - 1,
-              Math.floor(((iv - minInt) / (maxInt - minInt)) * binCount),
-            );
+          : Math.min(binCount - 1, Math.floor(((iv - minInt) / (maxInt - minInt)) * binCount));
       bins[bin]++;
     }
     for (const count of bins) {
@@ -303,8 +273,7 @@ export function encode(payload: BiometricPayload): number[] {
       overlaps++;
     }
   }
-  const strokeOverlap =
-    allStrokes.length > 1 ? overlaps / (allStrokes.length - 1) : 0;
+  const strokeOverlap = allStrokes.length > 1 ? overlaps / (allStrokes.length - 1) : 0;
 
   vec.push(norm(pauseRatio, 0, 1));
   vec.push(norm(speedAccelPattern, 0, 3));
@@ -329,22 +298,20 @@ export function encode(payload: BiometricPayload): number[] {
 
   // ── Dims 58-63: Device features (6d) ──
   // Input type one-hot (3d): mouse, touch, pen
-  vec.push(payload.inputType === "mouse" ? 1 : 0);
-  vec.push(payload.inputType === "touch" ? 1 : 0);
-  vec.push(payload.inputType === "pen" ? 1 : 0);
+  vec.push(payload.inputType === 'mouse' ? 1 : 0);
+  vec.push(payload.inputType === 'touch' ? 1 : 0);
+  vec.push(payload.inputType === 'pen' ? 1 : 0);
   vec.push(norm(payload.screenWidth, 0, 3840));
   vec.push(norm(payload.screenHeight, 0, 2160));
   vec.push(norm(payload.devicePixelRatio, 1, 4));
 
   // Sanity check
   if (vec.length !== EMBEDDING_DIMS) {
-    throw new Error(
-      `Embedding dimension mismatch: expected ${EMBEDDING_DIMS}, got ${vec.length}`,
-    );
+    throw new Error(`Embedding dimension mismatch: expected ${EMBEDDING_DIMS}, got ${vec.length}`);
   }
 
   return vec;
 }
 
-export const EMBEDDING_VERSION = "v1";
+export const EMBEDDING_VERSION = 'v1';
 export { EMBEDDING_DIMS };

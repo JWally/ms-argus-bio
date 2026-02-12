@@ -1,8 +1,8 @@
 // server/classifier.ts
 // kNN classification logic using Qdrant nearest neighbor results
 
-import type { VectorSearchResult } from "./qdrant-client";
-import type { Label } from "./types";
+import type { VectorSearchResult } from './qdrant-client';
+import type { Label } from './types';
 
 const K = 10;
 const SCORE_THRESHOLD = 0.7;
@@ -25,18 +25,16 @@ export interface ClassifyResult {
  */
 export function classify(
   neighbors: VectorSearchResult[],
-  heuristicFallback: Label,
+  heuristicFallback: Label
 ): ClassifyResult {
   // Filter to neighbors above score threshold
-  const qualified = neighbors
-    .filter((n) => n.score >= SCORE_THRESHOLD)
-    .slice(0, K);
+  const qualified = neighbors.filter((n) => n.score >= SCORE_THRESHOLD).slice(0, K);
 
   // Cold start: no neighbors → use heuristic
   if (qualified.length === 0) {
     return {
       verdict: heuristicFallback,
-      confidence: heuristicFallback === "uncertain" ? 0.5 : 0.6,
+      confidence: heuristicFallback === 'uncertain' ? 0.5 : 0.6,
       neighborCount: 0,
     };
   }
@@ -44,14 +42,14 @@ export function classify(
   // Weighted voting by similarity score
   let humanWeight = 0;
   let botWeight = 0;
-  let totalWeight = 0;
+  let _totalWeight = 0;
 
   for (const neighbor of qualified) {
     const label = neighbor.payload?.label as string | undefined;
     const weight = neighbor.score;
-    totalWeight += weight;
-    if (label === "human") humanWeight += weight;
-    else if (label === "bot") botWeight += weight;
+    _totalWeight += weight;
+    if (label === 'human') humanWeight += weight;
+    else if (label === 'bot') botWeight += weight;
     // "uncertain" neighbors don't vote
   }
 
@@ -70,13 +68,13 @@ export function classify(
   let confidence: number;
 
   if (humanScore >= 0.7) {
-    verdict = "human";
+    verdict = 'human';
     confidence = humanScore;
   } else if (humanScore <= 0.3) {
-    verdict = "bot";
+    verdict = 'bot';
     confidence = 1 - humanScore;
   } else {
-    verdict = "uncertain";
+    verdict = 'uncertain';
     confidence = 1 - Math.abs(humanScore - 0.5) * 2; // peaks at 0.5
   }
 

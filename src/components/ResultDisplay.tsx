@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 
 const STORAGE_KEY = 'argus-bio-leaderboard';
 const PR_KEY = 'argus-bio-pr';
@@ -32,7 +32,9 @@ function getOrCreateBoard(userTimeMs: number): StoredEntry[] {
     try {
       const parsed = JSON.parse(stored) as StoredEntry[];
       if (Array.isArray(parsed) && parsed.length === BOARD_SIZE) return parsed;
-    } catch { /* regenerate */ }
+    } catch {
+      /* regenerate */
+    }
   }
 
   // Cap at 7s for generation
@@ -40,7 +42,8 @@ function getOrCreateBoard(userTimeMs: number): StoredEntry[] {
   const entries: StoredEntry[] = [];
   for (let i = 0; i < BOARD_SIZE; i++) {
     // Uniform distribution between MIN_TIME_MS and cap
-    const t = MIN_TIME_MS + (cap - MIN_TIME_MS) * (i / (BOARD_SIZE - 1)) * (0.85 + Math.random() * 0.15);
+    const t =
+      MIN_TIME_MS + (cap - MIN_TIME_MS) * (i / (BOARD_SIZE - 1)) * (0.85 + Math.random() * 0.15);
     entries.push({ ip: randomNKIP(), timeMs: t });
   }
   entries.sort((a, b) => a.timeMs - b.timeMs);
@@ -75,10 +78,13 @@ interface LeaderboardRow {
 function buildLeaderboard(
   board: StoredEntry[],
   currentTimeMs: number | null,
-  prTimeMs: number | null,
+  prTimeMs: number | null
 ): LeaderboardRow[] {
-  const rows: { label: string; timeMs: number; kind: RowKind }[] =
-    board.map((e) => ({ label: e.ip, timeMs: e.timeMs, kind: 'fake' as RowKind }));
+  const rows: { label: string; timeMs: number; kind: RowKind }[] = board.map((e) => ({
+    label: e.ip,
+    timeMs: e.timeMs,
+    kind: 'fake' as RowKind,
+  }));
 
   // Add PR if it beats anyone on the board
   if (prTimeMs !== null && prTimeMs < board[board.length - 1].timeMs) {
@@ -127,16 +133,59 @@ function estimateRank(board: StoredEntry[], userTimeMs: number): { rank: number;
   return { rank, capped: false };
 }
 
+interface VerdictResult {
+  verdict: 'human' | 'bot' | 'uncertain';
+  confidence: number;
+  neighborCount: number;
+  heuristicLabel: string;
+}
+
+interface DigitResult {
+  target: number;
+  recognized: number;
+  confidence: number;
+  timeMs: number;
+}
+
+interface BiometricFeatures {
+  strokeCount: number;
+  totalPoints: number;
+  avgSpeed: number;
+  speedVariance: number;
+  maxSpeed: number;
+  avgPressure: number;
+  pressureVariance: number;
+  avgContactWidth: number;
+  avgContactHeight: number;
+  totalDurationMs: number;
+  avgTimeBetweenStrokes: number;
+  eventFrequencyHz: number;
+  avgJerk: number;
+}
+
 interface ResultDisplayProps {
   totalTimeMs: number;
   timedOut: boolean;
+  verdict: VerdictResult | null;
+  digits: DigitResult[];
+  features: BiometricFeatures;
 }
+
+const VERDICT_CONFIG = {
+  human: { label: 'HUMAN', className: 'verdict-human' },
+  bot: { label: 'BOT', className: 'verdict-bot' },
+  uncertain: { label: 'UNCERTAIN', className: 'verdict-uncertain' },
+} as const;
 
 export default function ResultDisplay({
   totalTimeMs,
   timedOut,
+  verdict,
+  digits,
+  features,
 }: ResultDisplayProps) {
   const passed = !timedOut;
+  const [statsOpen, setStatsOpen] = useState(false);
 
   const { leaderboard, currentOnBoard, offBoardRank } = useMemo(() => {
     const b = getOrCreateBoard(totalTimeMs);
@@ -147,13 +196,38 @@ export default function ResultDisplay({
     return { leaderboard: lb, currentOnBoard: onBoard, offBoardRank: rank };
   }, [passed, totalTimeMs]);
 
+  const verdictCfg = verdict ? VERDICT_CONFIG[verdict.verdict] : null;
+
   return (
     <div className={`result-panel ${passed ? 'result-pass' : 'result-fail'}`}>
       <div className="result-header">{passed ? 'VERIFIED' : 'TIMEOUT'}</div>
       <div className="result-time">{formatTime(totalTimeMs)}</div>
 
+      {/* Verdict badge */}
+      <div className="verdict-section">
+        {verdict ? (
+          <>
+            <div className={`verdict-badge ${verdictCfg!.className}`}>{verdictCfg!.label}</div>
+            <div className="verdict-confidence">
+              {Math.round(verdict.confidence * 100)}% confidence
+              {verdict.neighborCount > 0 && (
+                <span className="verdict-neighbors">
+                  {' '}
+                  &middot; {verdict.neighborCount} neighbors
+                </span>
+              )}
+            </div>
+          </>
+        ) : (
+          <div className="verdict-loading">
+            <div className="verdict-spinner" />
+            Classifying...
+          </div>
+        )}
+      </div>
+
       <div className="leaderboard">
-        <div className="leaderboard-title">Today's Top Times</div>
+        <div className="leaderboard-title">Today&apos;s Top Times</div>
         <div className="leaderboard-rows">
           {leaderboard.map((entry) => (
             <div
@@ -162,36 +236,120 @@ export default function ResultDisplay({
                 'leaderboard-row',
                 entry.kind === 'current' && 'leaderboard-current',
                 entry.kind === 'pr' && 'leaderboard-pr',
-              ].filter(Boolean).join(' ')}
+              ]
+                .filter(Boolean)
+                .join(' ')}
             >
               <span className="leaderboard-rank">#{entry.rank}</span>
               <span className="leaderboard-label">{entry.label}</span>
-              <span className="leaderboard-time">
-                {formatTime(entry.timeMs)}
-              </span>
+              <span className="leaderboard-time">{formatTime(entry.timeMs)}</span>
             </div>
           ))}
         </div>
-        {passed && currentOnBoard && (
-          <div className="leaderboard-msg">You made the board!</div>
-        )}
+        {passed && currentOnBoard && <div className="leaderboard-msg">You made the board!</div>}
         {passed && !currentOnBoard && offBoardRank && (
           <>
-            <div className="leaderboard-msg leaderboard-miss">
-              Not fast enough this time...
-            </div>
+            <div className="leaderboard-msg leaderboard-miss">Not fast enough this time...</div>
             <div className="leaderboard-row leaderboard-off-board">
               <span className="leaderboard-rank">
-                #{offBoardRank.rank}{offBoardRank.capped && '+'}
+                #{offBoardRank.rank}
+                {offBoardRank.capped && '+'}
               </span>
               <span className="leaderboard-label">YOU</span>
-              <span className="leaderboard-time">
-                {formatTime(totalTimeMs)}
-              </span>
+              <span className="leaderboard-time">{formatTime(totalTimeMs)}</span>
             </div>
           </>
         )}
       </div>
+
+      {/* Stats drawer toggle */}
+      <button
+        className="btn-stats-toggle"
+        onClick={() => setStatsOpen((o) => !o)}
+        aria-expanded={statsOpen}
+      >
+        {statsOpen ? 'Hide Stats' : 'Show Stats'}
+        <span className={`stats-chevron ${statsOpen ? 'stats-chevron-open' : ''}`}>&#9662;</span>
+      </button>
+
+      {/* Stats drawer */}
+      <div className={`stats-drawer ${statsOpen ? 'stats-drawer-open' : ''}`}>
+        <div className="stats-content">
+          {/* Per-digit breakdown */}
+          <div className="stats-section">
+            <div className="stats-section-title">Per-Digit Breakdown</div>
+            <div className="stats-grid">
+              {digits.map((d, i) => (
+                <div key={i} className="stats-digit-card">
+                  <div className="stats-digit-target">{d.target}</div>
+                  <div className="stats-digit-row">
+                    <span className="stats-label">Recognized</span>
+                    <span className="stats-value">{d.recognized}</span>
+                  </div>
+                  <div className="stats-digit-row">
+                    <span className="stats-label">Confidence</span>
+                    <span className="stats-value">{(d.confidence * 100).toFixed(1)}%</span>
+                  </div>
+                  <div className="stats-digit-row">
+                    <span className="stats-label">Time</span>
+                    <span className="stats-value">{formatTime(d.timeMs)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Biometric features */}
+          <div className="stats-section">
+            <div className="stats-section-title">Biometric Features</div>
+            <div className="stats-table">
+              <StatRow label="Strokes" value={features.strokeCount} />
+              <StatRow label="Total Points" value={features.totalPoints} />
+              <StatRow label="Avg Speed" value={features.avgSpeed.toFixed(3)} unit="px/ms" />
+              <StatRow label="Max Speed" value={features.maxSpeed.toFixed(3)} unit="px/ms" />
+              <StatRow label="Speed Variance" value={features.speedVariance.toFixed(4)} />
+              <StatRow label="Avg Pressure" value={features.avgPressure.toFixed(3)} />
+              <StatRow
+                label="Event Frequency"
+                value={features.eventFrequencyHz.toFixed(1)}
+                unit="Hz"
+              />
+              <StatRow label="Avg Jerk" value={features.avgJerk.toFixed(5)} />
+              <StatRow label="Total Duration" value={formatTime(features.totalDurationMs)} />
+              <StatRow
+                label="Avg Stroke Gap"
+                value={features.avgTimeBetweenStrokes.toFixed(0)}
+                unit="ms"
+              />
+            </div>
+          </div>
+
+          {/* Classification details */}
+          {verdict && (
+            <div className="stats-section">
+              <div className="stats-section-title">Classification</div>
+              <div className="stats-table">
+                <StatRow label="Verdict" value={verdict.verdict.toUpperCase()} />
+                <StatRow label="Confidence" value={`${Math.round(verdict.confidence * 100)}%`} />
+                <StatRow label="Neighbors" value={verdict.neighborCount} />
+                <StatRow label="Heuristic" value={verdict.heuristicLabel} />
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StatRow({ label, value, unit }: { label: string; value: string | number; unit?: string }) {
+  return (
+    <div className="stats-row">
+      <span className="stats-label">{label}</span>
+      <span className="stats-value">
+        {value}
+        {unit && <span className="stats-unit"> {unit}</span>}
+      </span>
     </div>
   );
 }

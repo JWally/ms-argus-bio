@@ -9,7 +9,7 @@ export interface BiometricPayload {
   passed: boolean;
   digits: DigitResult[];
   confidenceTimeline: ConfidenceSnapshot[];
-  inputType: "mouse" | "touch" | "pen" | "unknown";
+  inputType: 'mouse' | 'touch' | 'pen' | 'unknown';
   screenWidth: number;
   screenHeight: number;
   devicePixelRatio: number;
@@ -65,7 +65,7 @@ export interface AggregateFeatures {
   avgJerk: number;
 }
 
-export type Label = "human" | "bot" | "uncertain";
+export type Label = 'human' | 'bot' | 'uncertain';
 
 export interface Verdict {
   verdict: Label;

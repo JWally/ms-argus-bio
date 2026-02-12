@@ -1,7 +1,7 @@
 // server/heuristics.ts
 // Auto-labeling rules for human/bot/uncertain classification
 
-import type { BiometricPayload, Label } from "./types";
+import type { BiometricPayload, Label } from './types';
 
 /**
  * Apply heuristic rules to auto-label a biometric payload.
@@ -23,11 +23,11 @@ export function heuristicLabel(payload: BiometricPayload): Label {
 
   // ── Bot signals (any one triggers) ──
   // Impossibly fast for writing 3 digits
-  if (payload.completionTimeMs < 500) return "bot";
+  if (payload.completionTimeMs < 500) return 'bot';
   // Synthetic event injection rate
-  if (f.eventFrequencyHz > 300) return "bot";
+  if (f.eventFrequencyHz > 300) return 'bot';
   // Perfectly uniform movement with enough points to rule out coincidence
-  if (f.speedVariance === 0 && f.totalPoints > 20) return "bot";
+  if (f.speedVariance === 0 && f.totalPoints > 20) return 'bot';
 
   // ── Human signals (all must hold) ──
   if (
@@ -38,8 +38,8 @@ export function heuristicLabel(payload: BiometricPayload): Label {
     f.strokeCount >= 3 &&
     f.totalPoints > 10
   ) {
-    return "human";
+    return 'human';
   }
 
-  return "uncertain";
+  return 'uncertain';
 }

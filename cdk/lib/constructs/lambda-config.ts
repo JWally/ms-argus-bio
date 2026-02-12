@@ -1,8 +1,8 @@
 // cdk/lib/constructs/lambda-config.ts
 // Lambda bundling configuration for Qdrant-compatible functions
 
-import * as lambda from "aws-cdk-lib/aws-lambda";
-import * as lambdaNode from "aws-cdk-lib/aws-lambda-nodejs";
+import * as lambda from 'aws-cdk-lib/aws-lambda';
+import * as lambdaNode from 'aws-cdk-lib/aws-lambda-nodejs';
 
 /**
  * Creates Lambda configuration for functions that use the Qdrant client.
@@ -12,9 +12,9 @@ export function createVectorLambdaConfig(): Partial<lambdaNode.NodejsFunctionPro
   const bundling: lambdaNode.BundlingOptions = {
     minify: true,
     sourceMap: true,
-    target: "node20",
+    target: 'node20',
     format: lambdaNode.OutputFormat.CJS,
-    mainFields: ["main", "module"],
+    mainFields: ['main', 'module'],
     keepNames: true,
   };
 
@@ -31,11 +31,11 @@ export function createVectorLambdaConfig(): Partial<lambdaNode.NodejsFunctionPro
  */
 export function createPowertoolsEnv(
   serviceName: string,
-  metricsNamespace: string,
+  metricsNamespace: string
 ): Record<string, string> {
   return {
     POWERTOOLS_SERVICE_NAME: serviceName,
     POWERTOOLS_METRICS_NAMESPACE: metricsNamespace,
-    NODE_OPTIONS: "--enable-source-maps",
+    NODE_OPTIONS: '--enable-source-maps',
   };
 }

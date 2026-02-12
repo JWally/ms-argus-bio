@@ -1,7 +1,7 @@
-import * as tf from '@tensorflow/tfjs-node';
 import { mkdir } from 'fs/promises';
 import { createGunzip } from 'zlib';
 import path from 'path';
+import * as tf from '@tensorflow/tfjs-node';
 
 const MNIST_BASE = 'https://storage.googleapis.com/cvdf-datasets/mnist/';
 const FILES = {
@@ -55,13 +55,12 @@ function oneHot(labels: Uint8Array, numClasses: number): Float32Array {
 
 async function main() {
   console.log('Downloading MNIST dataset...');
-  const [trainImgBuf, trainLblBuf, testImgBuf, testLblBuf] =
-    await Promise.all([
-      fetchAndDecompress(MNIST_BASE + FILES.trainImages),
-      fetchAndDecompress(MNIST_BASE + FILES.trainLabels),
-      fetchAndDecompress(MNIST_BASE + FILES.testImages),
-      fetchAndDecompress(MNIST_BASE + FILES.testLabels),
-    ]);
+  const [trainImgBuf, trainLblBuf, testImgBuf, testLblBuf] = await Promise.all([
+    fetchAndDecompress(MNIST_BASE + FILES.trainImages),
+    fetchAndDecompress(MNIST_BASE + FILES.trainLabels),
+    fetchAndDecompress(MNIST_BASE + FILES.testImages),
+    fetchAndDecompress(MNIST_BASE + FILES.testLabels),
+  ]);
 
   console.log('Parsing...');
   const trainImages = parseImages(trainImgBuf);
@@ -85,9 +84,7 @@ async function main() {
     })
   );
   model.add(tf.layers.maxPooling2d({ poolSize: 2 }));
-  model.add(
-    tf.layers.conv2d({ filters: 64, kernelSize: 3, activation: 'relu' })
-  );
+  model.add(tf.layers.conv2d({ filters: 64, kernelSize: 3, activation: 'relu' }));
   model.add(tf.layers.maxPooling2d({ poolSize: 2 }));
   model.add(tf.layers.flatten());
   model.add(tf.layers.dense({ units: 128, activation: 'relu' }));
@@ -131,7 +128,7 @@ async function main() {
   trainYs.dispose();
   testXs.dispose();
   testYs.dispose();
-  result.forEach((t) => t.dispose());
+  for (const t of result) t.dispose();
 }
 
 main().catch(console.error);

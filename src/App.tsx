@@ -50,10 +50,18 @@ interface ConfidenceSnapshot {
   topConf: number;
 }
 
+interface VerdictResult {
+  verdict: 'human' | 'bot' | 'uncertain';
+  confidence: number;
+  neighborCount: number;
+  heuristicLabel: string;
+}
+
 interface FinalResult {
   totalTimeMs: number;
   timedOut: boolean;
   digits: DigitResult[];
+  features: ReturnType<typeof computeFeatures>;
 }
 
 function formatTime(ms: number): string {
@@ -99,9 +107,7 @@ function computeFeatures(strokes: Stroke[]) {
       const p1 = stroke.points[i];
       const dt = p1.t - p0.t;
       if (dt > 0) {
-        speeds.push(
-          Math.sqrt((p1.x - p0.x) ** 2 + (p1.y - p0.y) ** 2) / dt
-        );
+        speeds.push(Math.sqrt((p1.x - p0.x) ** 2 + (p1.y - p0.y) ** 2) / dt);
       }
     }
     for (let i = 2; i < stroke.points.length; i++) {
@@ -111,10 +117,8 @@ function computeFeatures(strokes: Stroke[]) {
       const dt1 = p1.t - p0.t;
       const dt2 = p2.t - p1.t;
       if (dt1 > 0 && dt2 > 0) {
-        const s1 =
-          Math.sqrt((p1.x - p0.x) ** 2 + (p1.y - p0.y) ** 2) / dt1;
-        const s2 =
-          Math.sqrt((p2.x - p1.x) ** 2 + (p2.y - p1.y) ** 2) / dt2;
+        const s1 = Math.sqrt((p1.x - p0.x) ** 2 + (p1.y - p0.y) ** 2) / dt1;
+        const s2 = Math.sqrt((p2.x - p1.x) ** 2 + (p2.y - p1.y) ** 2) / dt2;
         accelerations.push((s2 - s1) / ((dt1 + dt2) / 2));
       }
     }
@@ -125,8 +129,7 @@ function computeFeatures(strokes: Stroke[]) {
     jerks.push(Math.abs(accelerations[i] - accelerations[i - 1]));
   }
 
-  const avg = (a: number[]) =>
-    a.length ? a.reduce((s, v) => s + v, 0) / a.length : 0;
+  const avg = (a: number[]) => (a.length ? a.reduce((s, v) => s + v, 0) / a.length : 0);
   const variance = (a: number[]) => {
     const m = avg(a);
     return a.length ? a.reduce((s, v) => s + (v - m) ** 2, 0) / a.length : 0;
@@ -153,16 +156,12 @@ function computeFeatures(strokes: Stroke[]) {
     avgContactHeight: avg(heights),
     totalDurationMs: totalTime,
     avgTimeBetweenStrokes: avg(strokeGaps),
-    eventFrequencyHz:
-      totalTime > 0 ? (allPoints.length / totalTime) * 1000 : 0,
+    eventFrequencyHz: totalTime > 0 ? (allPoints.length / totalTime) * 1000 : 0,
     avgJerk: avg(jerks),
   };
 }
 
-function normalizeStrokes(
-  strokes: Stroke[],
-  startTime: number
-): NormalizedStroke[] {
+function normalizeStrokes(strokes: Stroke[], startTime: number): NormalizedStroke[] {
   const sz = 280;
   return strokes.map((s) => ({
     points: s.points.map((p) => ({
@@ -190,6 +189,7 @@ function App() {
   const [elapsedMs, setElapsedMs] = useState(0);
   const [currentConfidence, setCurrentConfidence] = useState(0);
   const [finalResult, setFinalResult] = useState<FinalResult | null>(null);
+  const [verdict, setVerdict] = useState<VerdictResult | null>(null);
 
   const modelRef = useRef<tf.LayersModel | null>(null);
   const canvasRef = useRef<CanvasHandle>(null);
@@ -215,47 +215,44 @@ function App() {
     });
   }, []);
 
-  const logPayload = useCallback(
-    (totalTimeMs: number, timedOut: boolean) => {
-      const payload = {
-        challengeId: crypto.randomUUID(),
-        challenge: challengeRef.current,
-        timestamp: Date.now(),
-        completionTimeMs: totalTimeMs,
-        passed: !timedOut,
-        digits: digitResultsRef.current,
-        confidenceTimeline: confidenceTimelineRef.current,
-        inputType: canvasRef.current?.getInputType() ?? 'unknown',
-        screenWidth: window.screen.width,
-        screenHeight: window.screen.height,
-        devicePixelRatio: window.devicePixelRatio,
-        userAgent: navigator.userAgent,
-        features: computeFeatures(allStrokesRef.current),
-      };
-      console.log('[ARGUS BIO] Biometric Payload', payload);
+  const logPayload = useCallback((totalTimeMs: number, timedOut: boolean) => {
+    const payload = {
+      challengeId: crypto.randomUUID(),
+      challenge: challengeRef.current,
+      timestamp: Date.now(),
+      completionTimeMs: totalTimeMs,
+      passed: !timedOut,
+      digits: digitResultsRef.current,
+      confidenceTimeline: confidenceTimelineRef.current,
+      inputType: canvasRef.current?.getInputType() ?? 'unknown',
+      screenWidth: window.screen.width,
+      screenHeight: window.screen.height,
+      devicePixelRatio: window.devicePixelRatio,
+      userAgent: navigator.userAgent,
+      features: computeFeatures(allStrokesRef.current),
+    };
+    console.log('[ARGUS BIO] Biometric Payload', payload);
 
-      if (API_URL) {
-        fetch(`${API_URL}/v1/classify`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
+    if (API_URL) {
+      fetch(`${API_URL}/v1/classify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+        .then((res) => res.json())
+        .then((v) => {
+          console.log('[ARGUS BIO] Verdict', v);
+          setVerdict(v as VerdictResult);
         })
-          .then((res) => res.json())
-          .then((verdict) => {
-            console.log('[ARGUS BIO] Verdict', verdict);
-          })
-          .catch((err) => {
-            console.error('[ARGUS BIO] Classification error', err);
-          });
-      }
-    },
-    []
-  );
+        .catch((err) => {
+          console.error('[ARGUS BIO] Classification error', err);
+        });
+    }
+  }, []);
 
   // Start game on first canvas touch
   const handleCanvasPointerDown = useCallback(() => {
-    if (activeRef.current || state === 'loading' || state === 'complete')
-      return;
+    if (activeRef.current || state === 'loading' || state === 'complete') return;
     if (state !== 'idle') return;
 
     activeRef.current = true;
@@ -279,6 +276,7 @@ function App() {
           totalTimeMs: totalTime,
           timedOut: true,
           digits: [...digitResultsRef.current],
+          features: computeFeatures(allStrokesRef.current),
         });
         setState('complete');
         logPayload(totalTime, true);
@@ -296,10 +294,7 @@ function App() {
 
       const idx = currentDigitIndexRef.current;
       const targetDigit = challengeRef.current[idx];
-      const { digit, confidence, allConfidences } = predict(
-        modelRef.current,
-        canvas
-      );
+      const { digit, confidence, allConfidences } = predict(modelRef.current, canvas);
       const targetConf = allConfidences[targetDigit];
       setCurrentConfidence(targetConf);
 
@@ -341,6 +336,7 @@ function App() {
               totalTimeMs: totalTime,
               timedOut: false,
               digits: [...digitResultsRef.current],
+              features: computeFeatures(allStrokesRef.current),
             });
             setState('complete');
             logPayload(totalTime, false);
@@ -369,6 +365,7 @@ function App() {
     setCurrentConfidence(0);
     setCurrentDigitIndex(0);
     setFinalResult(null);
+    setVerdict(null);
     stableCountRef.current = 0;
     currentDigitIndexRef.current = 0;
     digitResultsRef.current = [];
@@ -380,12 +377,7 @@ function App() {
     setState('idle');
   }, []);
 
-  const confLevel =
-    currentConfidence >= 0.9
-      ? 'high'
-      : currentConfidence >= 0.5
-        ? 'mid'
-        : 'low';
+  const confLevel = currentConfidence >= 0.9 ? 'high' : currentConfidence >= 0.5 ? 'mid' : 'low';
 
   const timerClass = [
     'timer',
@@ -396,12 +388,7 @@ function App() {
     .filter(Boolean)
     .join(' ');
 
-  const canvasState =
-    state === 'idle'
-      ? 'canvas-idle'
-      : state === 'active'
-        ? 'canvas-active'
-        : '';
+  const canvasState = state === 'idle' ? 'canvas-idle' : state === 'active' ? 'canvas-active' : '';
 
   return (
     <div className="app">
@@ -446,10 +433,7 @@ function App() {
           )}
 
           {state !== 'complete' && (
-            <div
-              className={`canvas-area ${canvasState}`}
-              onPointerDown={handleCanvasPointerDown}
-            >
+            <div className={`canvas-area ${canvasState}`} onPointerDown={handleCanvasPointerDown}>
               <DrawingCanvas ref={canvasRef} />
 
               <div className="confidence-track">
@@ -463,18 +447,13 @@ function App() {
                 <div className="confidence-threshold" />
               </div>
 
-              {state === 'idle' && (
-                <p className="touch-hint">Touch canvas to begin</p>
-              )}
+              {state === 'idle' && <p className="touch-hint">Touch canvas to begin</p>}
             </div>
           )}
 
           <div className="action-stack">
             {state === 'active' && (
-              <button
-                onClick={handleReset}
-                className="btn btn-secondary btn-stack"
-              >
+              <button onClick={handleReset} className="btn btn-secondary btn-stack">
                 Reset
               </button>
             )}
@@ -483,13 +462,14 @@ function App() {
                 <ResultDisplay
                   totalTimeMs={finalResult.totalTimeMs}
                   timedOut={finalResult.timedOut}
+                  verdict={verdict}
+                  digits={finalResult.digits}
+                  features={finalResult.features}
                 />
-                <button
-                  onClick={handleReset}
-                  className="btn btn-primary btn-stack"
-                >
+                <button onClick={handleReset} className="btn btn-primary btn-stack">
                   Try Again
                 </button>
+                <button className="btn btn-primary btn-stack">Continue</button>
               </>
             )}
           </div>

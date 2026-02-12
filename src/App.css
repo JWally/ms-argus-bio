@@ -127,7 +127,9 @@ header h1 {
   touch-action: none;
   width: var(--canvas-size);
   height: var(--canvas-size);
-  transition: opacity 0.3s, border-color 0.3s;
+  transition:
+    opacity 0.3s,
+    border-color 0.3s;
 }
 
 .canvas-idle .drawing-canvas {
@@ -280,20 +282,12 @@ header h1 {
 }
 
 .result-pass {
-  background: linear-gradient(
-    135deg,
-    rgba(34, 197, 94, 0.1),
-    rgba(34, 197, 94, 0.05)
-  );
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(34, 197, 94, 0.05));
   border: 1px solid rgba(34, 197, 94, 0.3);
 }
 
 .result-fail {
-  background: linear-gradient(
-    135deg,
-    rgba(239, 68, 68, 0.1),
-    rgba(239, 68, 68, 0.05)
-  );
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.1), rgba(239, 68, 68, 0.05));
   border: 1px solid rgba(239, 68, 68, 0.3);
 }
 
@@ -404,6 +398,193 @@ header h1 {
   background: rgba(220, 50, 50, 0.12);
   color: #dc5050;
   font-weight: 700;
+}
+
+/* Verdict */
+.verdict-section {
+  margin-bottom: 1.25rem;
+}
+
+.verdict-badge {
+  display: inline-block;
+  padding: 0.25rem 1rem;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  font-weight: 800;
+  letter-spacing: 0.15em;
+  margin-bottom: 0.375rem;
+}
+
+.verdict-human {
+  background: rgba(34, 197, 94, 0.15);
+  color: var(--success);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.verdict-bot {
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--fail);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.verdict-uncertain {
+  background: rgba(234, 179, 8, 0.15);
+  color: #eab308;
+  border: 1px solid rgba(234, 179, 8, 0.3);
+}
+
+.verdict-confidence {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.verdict-neighbors {
+  opacity: 0.7;
+}
+
+.verdict-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.verdict-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+/* Stats drawer toggle */
+.btn-stats-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.625rem;
+  margin-top: 1rem;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-stats-toggle:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.stats-chevron {
+  font-size: 0.7rem;
+  transition: transform 0.3s ease;
+}
+
+.stats-chevron-open {
+  transform: rotate(180deg);
+}
+
+/* Stats drawer */
+.stats-drawer {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.4s ease;
+}
+
+.stats-drawer-open {
+  max-height: 800px;
+}
+
+.stats-content {
+  padding-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.stats-section {
+  text-align: left;
+}
+
+.stats-section-title {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--text-muted);
+  margin-bottom: 0.5rem;
+}
+
+/* Digit cards */
+.stats-grid {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.stats-digit-card {
+  flex: 1;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.625rem;
+  text-align: center;
+}
+
+.stats-digit-target {
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: var(--accent);
+  margin-bottom: 0.375rem;
+}
+
+.stats-digit-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.7rem;
+  padding: 0.125rem 0;
+}
+
+/* Stats table rows */
+.stats-table {
+  display: flex;
+  flex-direction: column;
+}
+
+.stats-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.3rem 0.5rem;
+  font-size: 0.8rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.stats-row:last-child {
+  border-bottom: none;
+}
+
+.stats-label {
+  color: var(--text-muted);
+}
+
+.stats-value {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.stats-unit {
+  color: var(--text-muted);
+  font-weight: 400;
+  font-size: 0.7rem;
 }
 
 /* Main */

@@ -1,0 +1,8 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "entry": ["server/handler.ts", "cdk/bin/main.ts"],
+  "project": ["src/**/*.{ts,tsx}", "server/**/*.ts", "cdk/**/*.ts", "scripts/**/*.ts"],
+  "ignore": ["**/*.test.ts"],
+  "ignoreBinaries": ["cdk"],
+  "exclude": ["types", "nsTypes", "exports"]
+}
