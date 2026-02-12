@@ -94,6 +94,22 @@ export class QdrantClient {
     await client.createCollection(collection, options);
   }
 
+  async deleteCollection(collection: string): Promise<void> {
+    const client = await this.getClient();
+    await client.deleteCollection(collection);
+  }
+
+  async collectionInfo(
+    collection: string,
+  ): Promise<{ points_count: number; status: string }> {
+    const client = await this.getClient();
+    const info = await client.getCollection(collection);
+    return {
+      points_count: info.points_count ?? 0,
+      status: info.status,
+    };
+  }
+
   private async getClient(): Promise<OfficialClient> {
     const apiKey = await this.getApiKey();
     if (!this.client) {

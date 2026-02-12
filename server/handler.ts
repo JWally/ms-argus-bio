@@ -109,6 +109,16 @@ export async function handler(
     return handleClassify(event);
   }
 
+  // POST /admin/flush — delete and recreate the collection
+  if (method === "POST" && path === "/admin/flush") {
+    return handleFlush();
+  }
+
+  // GET /admin/stats — collection point count
+  if (method === "GET" && path === "/admin/stats") {
+    return handleStats();
+  }
+
   return jsonResponse(404, { error: "Not found" });
 }
 
@@ -204,5 +214,39 @@ async function handleClassify(
     metrics.addMetric("ClassifyError", MetricUnit.Count, 1);
     metrics.publishStoredMetrics();
     return jsonResponse(500, { error: "Internal server error" });
+  }
+}
+
+async function handleFlush(): Promise<APIGatewayProxyResultV2> {
+  try {
+    const client = getQdrantClient();
+    const exists = await client.collectionExists(COLLECTION_NAME);
+    if (exists) {
+      await client.deleteCollection(COLLECTION_NAME);
+    }
+    await client.createCollection(COLLECTION_NAME, {
+      vectors: { size: EMBEDDING_DIMS, distance: "Cosine" },
+    });
+    collectionReady = true;
+    logger.info("Collection flushed", { collection: COLLECTION_NAME });
+    return jsonResponse(200, { status: "flushed", collection: COLLECTION_NAME });
+  } catch (error) {
+    logger.error("Flush failed", { error });
+    return jsonResponse(500, { error: "Flush failed" });
+  }
+}
+
+async function handleStats(): Promise<APIGatewayProxyResultV2> {
+  try {
+    const client = getQdrantClient();
+    const exists = await client.collectionExists(COLLECTION_NAME);
+    if (!exists) {
+      return jsonResponse(200, { collection: COLLECTION_NAME, points_count: 0, status: "not_found" });
+    }
+    const info = await client.collectionInfo(COLLECTION_NAME);
+    return jsonResponse(200, { collection: COLLECTION_NAME, ...info });
+  } catch (error) {
+    logger.error("Stats failed", { error });
+    return jsonResponse(500, { error: "Stats failed" });
   }
 }

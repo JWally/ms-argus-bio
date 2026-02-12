@@ -9,6 +9,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "train": "tsx scripts/train.ts",
+    "build:site": "VITE_API_URL=https://api-bio-dev-jw.argus.pw npm run build",
+    "deploy": "npm run build:site && npm run cdk:deploy",
     "cdk:deploy": "npx cdk deploy --require-approval never",
     "cdk:synth": "npx cdk synth",
     "typecheck:server": "tsc -p tsconfig.server.json --noEmit"

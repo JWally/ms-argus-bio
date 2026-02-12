@@ -421,53 +421,53 @@ function App() {
 
       {state !== 'loading' && (
         <main>
-          <div className="challenge-digits">
-            {challenge.map((d, i) => (
-              <span
-                key={i}
-                className={[
-                  'challenge-digit',
-                  i < currentDigitIndex && 'digit-done',
-                  i === currentDigitIndex &&
-                    state !== 'complete' &&
-                    'digit-current',
-                  i > currentDigitIndex && 'digit-upcoming',
-                  state === 'complete' && 'digit-done',
-                ]
-                  .filter(Boolean)
-                  .join(' ')}
-              >
-                {d}
-              </span>
-            ))}
-          </div>
+          {state !== 'complete' && (
+            <>
+              <div className="challenge-digits">
+                {challenge.map((d, i) => (
+                  <span
+                    key={i}
+                    className={[
+                      'challenge-digit',
+                      i < currentDigitIndex && 'digit-done',
+                      i === currentDigitIndex && 'digit-current',
+                      i > currentDigitIndex && 'digit-upcoming',
+                    ]
+                      .filter(Boolean)
+                      .join(' ')}
+                  >
+                    {d}
+                  </span>
+                ))}
+              </div>
 
-          <div className={timerClass}>{formatTime(elapsedMs)}</div>
+              <div className={timerClass}>{formatTime(elapsedMs)}</div>
+            </>
+          )}
 
-          <div
-            className={`canvas-area ${canvasState}`}
-            onPointerDown={handleCanvasPointerDown}
-          >
-            <DrawingCanvas
-              ref={canvasRef}
-              disabled={state === 'loading' || state === 'complete'}
-            />
+          {state !== 'complete' && (
+            <div
+              className={`canvas-area ${canvasState}`}
+              onPointerDown={handleCanvasPointerDown}
+            >
+              <DrawingCanvas ref={canvasRef} />
 
-            <div className="confidence-track">
-              <div
-                className="confidence-fill"
-                data-level={state === 'active' ? confLevel : 'idle'}
-                style={{
-                  width: `${Math.round(currentConfidence * 100)}%`,
-                }}
-              />
-              <div className="confidence-threshold" />
+              <div className="confidence-track">
+                <div
+                  className="confidence-fill"
+                  data-level={state === 'active' ? confLevel : 'idle'}
+                  style={{
+                    width: `${Math.round(currentConfidence * 100)}%`,
+                  }}
+                />
+                <div className="confidence-threshold" />
+              </div>
+
+              {state === 'idle' && (
+                <p className="touch-hint">Touch canvas to begin</p>
+              )}
             </div>
-
-            {state === 'idle' && (
-              <p className="touch-hint">Touch canvas to begin</p>
-            )}
-          </div>
+          )}
 
           <div className="action-stack">
             {state === 'active' && (
@@ -481,8 +481,6 @@ function App() {
             {state === 'complete' && finalResult && (
               <>
                 <ResultDisplay
-                  challenge={challenge}
-                  digits={finalResult.digits}
                   totalTimeMs={finalResult.totalTimeMs}
                   timedOut={finalResult.timedOut}
                 />
