@@ -49,35 +49,18 @@ header h1 {
   font-size: 0.85rem;
 }
 
-/* Challenge digits */
+/* Challenge digits (Ishihara dot plates) */
 .challenge-digits {
   display: flex;
-  gap: 1rem;
+  gap: 0.5rem;
   justify-content: center;
-  align-items: baseline;
+  align-items: center;
   margin-bottom: 0.25rem;
 }
 
-.challenge-digit {
-  font-size: 2.5rem;
-  font-weight: 800;
-  transition: all 0.3s ease;
-}
-
-.digit-current {
-  font-size: 4.5rem;
-  color: var(--accent);
-  text-shadow: 0 0 20px var(--accent-glow);
-}
-
-.digit-done {
-  color: var(--success);
-  opacity: 0.6;
-}
-
-.digit-upcoming {
-  color: var(--text-muted);
-  opacity: 0.3;
+.dot-digit-canvas {
+  border-radius: 50%;
+  transition: opacity 0.3s ease;
 }
 
 /* Timer */

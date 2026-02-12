@@ -7,6 +7,7 @@ import DrawingCanvas, {
   type StrokePoint,
 } from './components/DrawingCanvas';
 import ResultDisplay from './components/ResultDisplay';
+import DotDigit from './components/DotDigit';
 import './App.css';
 
 type AppState = 'loading' | 'idle' | 'active' | 'complete';
@@ -411,21 +412,15 @@ function App() {
           {state !== 'complete' && (
             <>
               <div className="challenge-digits">
-                {challenge.map((d, i) => (
-                  <span
-                    key={i}
-                    className={[
-                      'challenge-digit',
-                      i < currentDigitIndex && 'digit-done',
-                      i === currentDigitIndex && 'digit-current',
-                      i > currentDigitIndex && 'digit-upcoming',
-                    ]
-                      .filter(Boolean)
-                      .join(' ')}
-                  >
-                    {d}
-                  </span>
-                ))}
+                {challenge.map((d, i) => {
+                  const digitState =
+                    i < currentDigitIndex
+                      ? 'done'
+                      : i === currentDigitIndex
+                        ? 'current'
+                        : 'upcoming';
+                  return <DotDigit key={`${d}-${i}`} digit={d} state={digitState} />;
+                })}
               </div>
 
               <div className={timerClass}>{formatTime(elapsedMs)}</div>
