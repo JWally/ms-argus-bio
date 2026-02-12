@@ -460,28 +460,17 @@ header h1 {
   animation: spin 0.8s linear infinite;
 }
 
-/* Stats drawer toggle */
+/* Stats wrapper */
+.stats-wrapper {
+  width: 100%;
+}
+
+/* Stats toggle - extends .btn .btn-secondary .btn-stack */
 .btn-stats-toggle {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  width: 100%;
-  padding: 0.625rem;
-  margin-top: 1rem;
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  color: var(--text-muted);
-  font-size: 0.85rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.btn-stats-toggle:hover {
-  background: var(--surface-2);
-  color: var(--text);
 }
 
 .stats-chevron {

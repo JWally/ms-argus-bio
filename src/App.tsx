@@ -463,18 +463,115 @@ function App() {
                   totalTimeMs={finalResult.totalTimeMs}
                   timedOut={finalResult.timedOut}
                   verdict={verdict}
-                  digits={finalResult.digits}
-                  features={finalResult.features}
                 />
                 <button onClick={handleReset} className="btn btn-primary btn-stack">
                   Try Again
                 </button>
                 <button className="btn btn-primary btn-stack">Continue</button>
+                <StatsDrawer
+                  digits={finalResult.digits}
+                  features={finalResult.features}
+                  verdict={verdict}
+                />
               </>
             )}
           </div>
         </main>
       )}
+    </div>
+  );
+}
+
+function StatsDrawer({
+  digits,
+  features,
+  verdict,
+}: {
+  digits: DigitResult[];
+  features: ReturnType<typeof computeFeatures>;
+  verdict: VerdictResult | null;
+}) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className="stats-wrapper">
+      <button
+        className="btn btn-secondary btn-stack btn-stats-toggle"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+      >
+        Stats
+        <span className={`stats-chevron ${open ? 'stats-chevron-open' : ''}`}>&#9662;</span>
+      </button>
+
+      <div className={`stats-drawer ${open ? 'stats-drawer-open' : ''}`}>
+        <div className="stats-content">
+          {/* Per-digit breakdown */}
+          <div className="stats-section">
+            <div className="stats-section-title">Per-Digit Breakdown</div>
+            <div className="stats-grid">
+              {digits.map((d, i) => (
+                <div key={i} className="stats-digit-card">
+                  <div className="stats-digit-target">{d.target}</div>
+                  <StatRow label="Recognized" value={d.recognized} />
+                  <StatRow label="Confidence" value={`${(d.confidence * 100).toFixed(1)}%`} />
+                  <StatRow label="Time" value={formatTime(d.timeMs)} />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Biometric features */}
+          <div className="stats-section">
+            <div className="stats-section-title">Biometric Features</div>
+            <div className="stats-table">
+              <StatRow label="Strokes" value={features.strokeCount} />
+              <StatRow label="Total Points" value={features.totalPoints} />
+              <StatRow label="Avg Speed" value={features.avgSpeed.toFixed(3)} unit="px/ms" />
+              <StatRow label="Max Speed" value={features.maxSpeed.toFixed(3)} unit="px/ms" />
+              <StatRow label="Speed Variance" value={features.speedVariance.toFixed(4)} />
+              <StatRow label="Avg Pressure" value={features.avgPressure.toFixed(3)} />
+              <StatRow
+                label="Event Frequency"
+                value={features.eventFrequencyHz.toFixed(1)}
+                unit="Hz"
+              />
+              <StatRow label="Avg Jerk" value={features.avgJerk.toFixed(5)} />
+              <StatRow label="Total Duration" value={formatTime(features.totalDurationMs)} />
+              <StatRow
+                label="Avg Stroke Gap"
+                value={features.avgTimeBetweenStrokes.toFixed(0)}
+                unit="ms"
+              />
+            </div>
+          </div>
+
+          {/* Classification details */}
+          {verdict && (
+            <div className="stats-section">
+              <div className="stats-section-title">Classification</div>
+              <div className="stats-table">
+                <StatRow label="Verdict" value={verdict.verdict.toUpperCase()} />
+                <StatRow label="Confidence" value={`${Math.round(verdict.confidence * 100)}%`} />
+                <StatRow label="Neighbors" value={verdict.neighborCount} />
+                <StatRow label="Heuristic" value={verdict.heuristicLabel} />
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StatRow({ label, value, unit }: { label: string; value: string | number; unit?: string }) {
+  return (
+    <div className="stats-row">
+      <span className="stats-label">{label}</span>
+      <span className="stats-value">
+        {value}
+        {unit && <span className="stats-unit"> {unit}</span>}
+      </span>
     </div>
   );
 }
