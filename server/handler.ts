@@ -15,9 +15,15 @@ const metrics = new Metrics();
 
 const COLLECTION_NAME = 'bio-handwriting';
 
+/** Stop upserting new training vectors once collection reaches this size */
+const TRAINING_CAP = 1000;
+
 // Module-scope singletons (reused across warm invocations)
 let qdrantClient: QdrantClient | null = null;
 let collectionReady = false;
+
+/** Cached point count — avoids extra Qdrant round-trip once training is done */
+let cachedPointCount: number | null = null;
 
 function getQdrantClient(): QdrantClient {
   if (!qdrantClient) {
@@ -163,26 +169,36 @@ async function handleClassify(event: APIGatewayProxyEventV2): Promise<APIGateway
     // Classify via kNN + heuristic fallback
     const result = classify(neighbors, hLabel);
 
-    // Upsert new point with metadata
-    const pointId = crypto.randomUUID();
-    await client.upsert(COLLECTION_NAME, {
-      points: [
-        {
-          id: pointId,
-          vector: embedding,
-          payload: {
-            label: result.verdict === 'uncertain' ? hLabel : result.verdict,
-            challengeId: payload.challengeId,
-            timestamp: payload.timestamp,
-            inputType: payload.inputType,
-            passed: payload.passed,
-            completionTimeMs: payload.completionTimeMs,
-            embeddingVersion: EMBEDDING_VERSION,
-            userAgent: payload.userAgent,
+    // Check training cap — skip upsert once collection has enough vectors
+    let trained = false;
+    if (cachedPointCount === null) {
+      const info = await client.collectionInfo(COLLECTION_NAME);
+      cachedPointCount = info.points_count;
+    }
+
+    if (cachedPointCount < TRAINING_CAP) {
+      const pointId = crypto.randomUUID();
+      await client.upsert(COLLECTION_NAME, {
+        points: [
+          {
+            id: pointId,
+            vector: embedding,
+            payload: {
+              label: result.verdict === 'uncertain' ? hLabel : result.verdict,
+              challengeId: payload.challengeId,
+              timestamp: payload.timestamp,
+              inputType: payload.inputType,
+              passed: payload.passed,
+              completionTimeMs: payload.completionTimeMs,
+              embeddingVersion: EMBEDDING_VERSION,
+              userAgent: payload.userAgent,
+            },
           },
-        },
-      ],
-    });
+        ],
+      });
+      cachedPointCount++;
+      trained = true;
+    }
 
     const verdict: Verdict = {
       verdict: result.verdict,
@@ -202,6 +218,8 @@ async function handleClassify(event: APIGatewayProxyEventV2): Promise<APIGateway
       confidence: result.confidence,
       neighborCount: result.neighborCount,
       heuristicLabel: hLabel,
+      trained,
+      pointCount: cachedPointCount,
       latencyMs: Date.now() - start,
     });
 
@@ -225,6 +243,7 @@ async function handleFlush(): Promise<APIGatewayProxyResultV2> {
       vectors: { size: EMBEDDING_DIMS, distance: 'Cosine' },
     });
     collectionReady = true;
+    cachedPointCount = 0;
     logger.info('Collection flushed', { collection: COLLECTION_NAME });
     return jsonResponse(200, { status: 'flushed', collection: COLLECTION_NAME });
   } catch (error) {
@@ -245,7 +264,12 @@ async function handleStats(): Promise<APIGatewayProxyResultV2> {
       });
     }
     const info = await client.collectionInfo(COLLECTION_NAME);
-    return jsonResponse(200, { collection: COLLECTION_NAME, ...info });
+    return jsonResponse(200, {
+      collection: COLLECTION_NAME,
+      ...info,
+      trainingCap: TRAINING_CAP,
+      trainingComplete: info.points_count >= TRAINING_CAP,
+    });
   } catch (error) {
     logger.error('Stats failed', { error });
     return jsonResponse(500, { error: 'Stats failed' });

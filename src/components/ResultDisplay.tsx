@@ -1,8 +1,10 @@
-import { useMemo } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 
 const STORAGE_KEY = 'argus-bio-leaderboard';
 const PR_KEY = 'argus-bio-pr';
 const BOARD_SIZE = 10;
+const MOBILE_BOARD_SIZE = 5;
+const MOBILE_BP = 768;
 const MIN_TIME_MS = 2750;
 const MAX_CAP_MS = 7000;
 
@@ -154,14 +156,24 @@ const VERDICT_CONFIG = {
 
 export default function ResultDisplay({ totalTimeMs, timedOut, verdict }: ResultDisplayProps) {
   const passed = !timedOut;
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < MOBILE_BP);
 
-  const { leaderboard, currentOnBoard, offBoardRank } = useMemo(() => {
+  useEffect(() => {
+    const mql = window.matchMedia(`(max-width: ${MOBILE_BP - 1}px)`);
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    mql.addEventListener('change', handler);
+    return () => mql.removeEventListener('change', handler);
+  }, []);
+
+  const displayLimit = isMobile ? MOBILE_BOARD_SIZE : BOARD_SIZE;
+
+  const { leaderboard, offBoardRank } = useMemo(() => {
     const b = getOrCreateBoard(totalTimeMs);
     const pr = passed ? updatePR(totalTimeMs) : getPR();
     const lb = buildLeaderboard(b, passed ? totalTimeMs : null, pr);
     const onBoard = lb.some((e) => e.kind === 'current');
     const rank = passed && !onBoard ? estimateRank(b, totalTimeMs) : null;
-    return { leaderboard: lb, currentOnBoard: onBoard, offBoardRank: rank };
+    return { leaderboard: lb, offBoardRank: rank };
   }, [passed, totalTimeMs]);
 
   const verdictCfg = verdict ? VERDICT_CONFIG[verdict.verdict] : null;
@@ -197,7 +209,7 @@ export default function ResultDisplay({ totalTimeMs, timedOut, verdict }: Result
       <div className="leaderboard">
         <div className="leaderboard-title">Today&apos;s Top Times</div>
         <div className="leaderboard-rows">
-          {leaderboard.map((entry) => (
+          {leaderboard.slice(0, displayLimit).map((entry) => (
             <div
               key={`${entry.kind}-${entry.rank}`}
               className={[
@@ -214,20 +226,30 @@ export default function ResultDisplay({ totalTimeMs, timedOut, verdict }: Result
             </div>
           ))}
         </div>
-        {passed && currentOnBoard && <div className="leaderboard-msg">You made the board!</div>}
-        {passed && !currentOnBoard && offBoardRank && (
-          <>
-            <div className="leaderboard-msg leaderboard-miss">Not fast enough this time...</div>
-            <div className="leaderboard-row leaderboard-off-board">
-              <span className="leaderboard-rank">
-                #{offBoardRank.rank}
-                {offBoardRank.capped && '+'}
-              </span>
-              <span className="leaderboard-label">YOU</span>
-              <span className="leaderboard-time">{formatTime(totalTimeMs)}</span>
-            </div>
-          </>
-        )}
+        {(() => {
+          const visibleRows = leaderboard.slice(0, displayLimit);
+          const youVisible = visibleRows.some((e) => e.kind === 'current');
+          if (!passed) return null;
+          if (youVisible) return <div className="leaderboard-msg">You made the board!</div>;
+          // User not in displayed slice — show their position below
+          const fullRank = leaderboard.findIndex((e) => e.kind === 'current');
+          const rank = fullRank >= 0 ? fullRank + 1 : offBoardRank?.rank;
+          const capped = fullRank < 0 && offBoardRank?.capped;
+          if (!rank) return null;
+          return (
+            <>
+              <div className="leaderboard-msg leaderboard-miss">Not fast enough this time...</div>
+              <div className="leaderboard-row leaderboard-off-board">
+                <span className="leaderboard-rank">
+                  #{rank}
+                  {capped && '+'}
+                </span>
+                <span className="leaderboard-label">YOU</span>
+                <span className="leaderboard-time">{formatTime(totalTimeMs)}</span>
+              </div>
+            </>
+          );
+        })()}
       </div>
     </div>
   );

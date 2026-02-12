@@ -256,6 +256,7 @@ function App() {
     if (activeRef.current || state === 'loading' || state === 'complete') return;
     if (state !== 'idle') return;
 
+    canvasRef.current?.clear();
     activeRef.current = true;
     setState('active');
 
@@ -411,17 +412,17 @@ function App() {
         <main>
           {state !== 'complete' && (
             <>
+              <div className={timerClass}>{formatTime(elapsedMs)}</div>
+
               <div className="challenge-digits">
                 <DotChallenge digits={challenge} currentIndex={currentDigitIndex} />
               </div>
-
-              <div className={timerClass}>{formatTime(elapsedMs)}</div>
             </>
           )}
 
           {state !== 'complete' && (
             <div className={`canvas-area ${canvasState}`} onPointerDown={handleCanvasPointerDown}>
-              <DrawingCanvas ref={canvasRef} />
+              <DrawingCanvas ref={canvasRef} idle={state === 'idle'} />
 
               <div className="confidence-track">
                 <div
@@ -433,8 +434,6 @@ function App() {
                 />
                 <div className="confidence-threshold" />
               </div>
-
-              {state === 'idle' && <p className="touch-hint">Touch canvas to begin</p>}
             </div>
           )}
 
