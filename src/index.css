@@ -1,0 +1,42 @@
+:root {
+  --bg: #0a0a12;
+  --surface: #12121f;
+  --surface-2: #1a1a2e;
+  --accent: #6366f1;
+  --accent-glow: rgba(99, 102, 241, 0.3);
+  --success: #22c55e;
+  --success-glow: rgba(34, 197, 94, 0.3);
+  --fail: #ef4444;
+  --fail-glow: rgba(239, 68, 68, 0.3);
+  --text: #e2e8f0;
+  --text-muted: #94a3b8;
+  --border: #2a2a3e;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+}
+
+#root {
+  width: 100%;
+  max-width: 600px;
+  padding: 2rem;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2rem;
+}

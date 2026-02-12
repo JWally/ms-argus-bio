@@ -1,0 +1,1 @@
+{ "app": "npx tsx cdk/bin/main.ts" }

@@ -1,0 +1,44 @@
+{
+  "name": "ms-argus-bio",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "eslint .",
+    "preview": "vite preview",
+    "train": "tsx scripts/train.ts",
+    "cdk:deploy": "npx cdk deploy --require-approval never",
+    "cdk:synth": "npx cdk synth",
+    "typecheck:server": "tsc -p tsconfig.server.json --noEmit"
+  },
+  "dependencies": {
+    "@aws-lambda-powertools/logger": "^2.12.0",
+    "@aws-lambda-powertools/metrics": "^2.12.0",
+    "@aws-sdk/client-secrets-manager": "^3.700.0",
+    "@qdrant/js-client-rest": "^1.13.0",
+    "@tensorflow/tfjs": "^4.22.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@tensorflow/tfjs-node": "^4.22.0",
+    "@types/aws-lambda": "^8.10.147",
+    "@types/node": "^24.10.1",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.1",
+    "aws-cdk-lib": "^2.178.0",
+    "constructs": "^10.4.2",
+    "eslint": "^9.39.1",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-refresh": "^0.4.24",
+    "globals": "^16.5.0",
+    "tsx": "^4.21.0",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.48.0",
+    "vite": "^7.3.1"
+  }
+}
