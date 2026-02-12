@@ -49,17 +49,18 @@ header h1 {
   font-size: 0.85rem;
 }
 
-/* Challenge digits (Ishihara dot plates) */
+/* Challenge digits (Ishihara dot plate) */
 .challenge-digits {
   display: flex;
-  gap: 0.5rem;
   justify-content: center;
   align-items: center;
+  width: var(--canvas-size);
   margin-bottom: 0.25rem;
 }
 
-.dot-digit-canvas {
-  border-radius: 50%;
+.dot-challenge-canvas {
+  width: var(--canvas-size);
+  border-radius: 12px;
   transition: opacity 0.3s ease;
 }
 
