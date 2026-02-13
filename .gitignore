@@ -16,6 +16,12 @@ dist-ssr
 cdk.out
 cdk.context.json
 
+# EMNIST training cache
+.emnist-cache
+
+# Test coverage
+coverage
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

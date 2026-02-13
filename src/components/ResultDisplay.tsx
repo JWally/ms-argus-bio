@@ -1,20 +1,16 @@
 import { useMemo, useState, useEffect } from 'react';
+import {
+  formatTime,
+  getOrCreateBoard,
+  buildRows,
+  getPR,
+  updatePR,
+  type BoardConfig,
+  type LeaderboardRow,
+} from './Leaderboard';
 
-const STORAGE_KEY = 'argus-bio-leaderboard';
-const PR_KEY = 'argus-bio-pr';
-const BOARD_SIZE = 10;
-const MOBILE_BOARD_SIZE = 5;
 const MOBILE_BP = 768;
-const MIN_TIME_MS = 2750;
-const MAX_CAP_MS = 7000;
-
-function formatTime(ms: number): string {
-  const totalSecs = Math.floor(ms / 1000);
-  const mins = Math.floor(totalSecs / 60);
-  const secs = totalSecs % 60;
-  const millis = Math.floor(ms % 1000);
-  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}.${String(millis).padStart(3, '0')}`;
-}
+const MAX_OFF_BOARD_RANK = 50;
 
 // North Korean IP ranges (175.45.176.0/22)
 function randomNKIP(): string {
@@ -23,114 +19,26 @@ function randomNKIP(): string {
   return `175.45.${b3}.${b4}`;
 }
 
-interface StoredEntry {
-  ip: string;
-  timeMs: number;
-}
+const BIO_CONFIG: BoardConfig = {
+  storageKey: 'argus-bio-leaderboard',
+  prKey: 'argus-bio-pr',
+  boardSize: 10,
+  mobileBoardSize: 5,
+  minTimeMs: 2750,
+  maxCapMs: 7000,
+  generateLabel: () => randomNKIP(),
+};
 
-function getOrCreateBoard(userTimeMs: number): StoredEntry[] {
-  const stored = localStorage.getItem(STORAGE_KEY);
-  if (stored) {
-    try {
-      const parsed = JSON.parse(stored) as StoredEntry[];
-      if (Array.isArray(parsed) && parsed.length === BOARD_SIZE) return parsed;
-    } catch {
-      /* regenerate */
-    }
-  }
-
-  // Cap at 7s for generation
-  const cap = Math.min(userTimeMs, MAX_CAP_MS);
-  const entries: StoredEntry[] = [];
-  for (let i = 0; i < BOARD_SIZE; i++) {
-    // Uniform distribution between MIN_TIME_MS and cap
-    const t =
-      MIN_TIME_MS + (cap - MIN_TIME_MS) * (i / (BOARD_SIZE - 1)) * (0.85 + Math.random() * 0.15);
-    entries.push({ ip: randomNKIP(), timeMs: t });
-  }
-  entries.sort((a, b) => a.timeMs - b.timeMs);
-
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
-  return entries;
-}
-
-function getPR(): number | null {
-  const v = localStorage.getItem(PR_KEY);
-  return v ? Number(v) : null;
-}
-
-function updatePR(timeMs: number): number {
-  const current = getPR();
-  if (current === null || timeMs < current) {
-    localStorage.setItem(PR_KEY, String(timeMs));
-    return timeMs;
-  }
-  return current;
-}
-
-type RowKind = 'fake' | 'current' | 'pr';
-
-interface LeaderboardRow {
-  rank: number;
-  label: string;
-  timeMs: number;
-  kind: RowKind;
-}
-
-function buildLeaderboard(
-  board: StoredEntry[],
-  currentTimeMs: number | null,
-  prTimeMs: number | null
-): LeaderboardRow[] {
-  const rows: { label: string; timeMs: number; kind: RowKind }[] = board.map((e) => ({
-    label: e.ip,
-    timeMs: e.timeMs,
-    kind: 'fake' as RowKind,
-  }));
-
-  // Add PR if it beats anyone on the board
-  if (prTimeMs !== null && prTimeMs < board[board.length - 1].timeMs) {
-    // Only add PR row if it's different from the current run
-    const prIsCurrent = currentTimeMs !== null && Math.abs(prTimeMs - currentTimeMs) < 1;
-    if (!prIsCurrent) {
-      rows.push({ label: 'PR', timeMs: prTimeMs, kind: 'pr' });
-    }
-  }
-
-  // Add current run
-  if (currentTimeMs !== null) {
-    rows.push({ label: 'YOU', timeMs: currentTimeMs, kind: 'current' });
-  }
-
-  return rows
-    .sort((a, b) => a.timeMs - b.timeMs)
-    .slice(0, BOARD_SIZE)
-    .map((e, i) => ({ ...e, rank: i + 1 }));
-}
-
-const MAX_OFF_BOARD_RANK = 50;
-
-/**
- * Estimate rank for a time that didn't make the top 10.
- * Uses the average gap between board entries to linearly
- * extrapolate past #10. Capped at 50 (shows "50+" beyond).
- */
-function estimateRank(board: StoredEntry[], userTimeMs: number): { rank: number; capped: boolean } {
-  const lastTime = board[board.length - 1].timeMs;
+function estimateRank(
+  boardSize: number,
+  lastTime: number,
+  userTimeMs: number,
+  avgGap: number
+): { rank: number; capped: boolean } {
   const overshootMs = userTimeMs - lastTime;
-  if (overshootMs <= 0) return { rank: BOARD_SIZE + 1, capped: false };
-
-  // Average gap between consecutive board entries
-  const gaps: number[] = [];
-  for (let i = 1; i < board.length; i++) {
-    gaps.push(board[i].timeMs - board[i - 1].timeMs);
-  }
-  const avgGap = gaps.reduce((s, g) => s + g, 0) / gaps.length;
-
-  // How many "slots" past #10
+  if (overshootMs <= 0) return { rank: boardSize + 1, capped: false };
   const slotsBack = avgGap > 0 ? Math.ceil(overshootMs / avgGap) : 1;
-  const rank = BOARD_SIZE + slotsBack;
-
+  const rank = boardSize + slotsBack;
   if (rank > MAX_OFF_BOARD_RANK) return { rank: MAX_OFF_BOARD_RANK, capped: true };
   return { rank, capped: false };
 }
@@ -165,14 +73,21 @@ export default function ResultDisplay({ totalTimeMs, timedOut, verdict }: Result
     return () => mql.removeEventListener('change', handler);
   }, []);
 
-  const displayLimit = isMobile ? MOBILE_BOARD_SIZE : BOARD_SIZE;
+  const displayLimit = isMobile ? BIO_CONFIG.mobileBoardSize : BIO_CONFIG.boardSize;
 
   const { leaderboard, offBoardRank } = useMemo(() => {
-    const b = getOrCreateBoard(totalTimeMs);
-    const pr = passed ? updatePR(totalTimeMs) : getPR();
-    const lb = buildLeaderboard(b, passed ? totalTimeMs : null, pr);
+    const b = getOrCreateBoard(BIO_CONFIG, totalTimeMs);
+    const pr = passed ? updatePR(BIO_CONFIG.prKey, totalTimeMs) : getPR(BIO_CONFIG.prKey);
+    const lb = buildRows(b, passed ? totalTimeMs : null, 'YOU', pr, BIO_CONFIG.boardSize);
     const onBoard = lb.some((e) => e.kind === 'current');
-    const rank = passed && !onBoard ? estimateRank(b, totalTimeMs) : null;
+
+    let rank: { rank: number; capped: boolean } | null = null;
+    if (passed && !onBoard) {
+      const last = b[b.length - 1].timeMs;
+      const gaps = b.slice(1).map((e, i) => e.timeMs - b[i].timeMs);
+      const avgGap = gaps.reduce((s, g) => s + g, 0) / gaps.length;
+      rank = estimateRank(BIO_CONFIG.boardSize, last, totalTimeMs, avgGap);
+    }
     return { leaderboard: lb, offBoardRank: rank };
   }, [passed, totalTimeMs]);
 
@@ -206,51 +121,74 @@ export default function ResultDisplay({ totalTimeMs, timedOut, verdict }: Result
         )}
       </div>
 
-      <div className="leaderboard">
-        <div className="leaderboard-title">Today&apos;s Top Times</div>
-        <div className="leaderboard-rows">
-          {leaderboard.slice(0, displayLimit).map((entry) => (
-            <div
-              key={`${entry.kind}-${entry.rank}`}
-              className={[
-                'leaderboard-row',
-                entry.kind === 'current' && 'leaderboard-current',
-                entry.kind === 'pr' && 'leaderboard-pr',
-              ]
-                .filter(Boolean)
-                .join(' ')}
-            >
-              <span className="leaderboard-rank">#{entry.rank}</span>
-              <span className="leaderboard-label">{entry.label}</span>
-              <span className="leaderboard-time">{formatTime(entry.timeMs)}</span>
-            </div>
-          ))}
-        </div>
-        {(() => {
-          const visibleRows = leaderboard.slice(0, displayLimit);
-          const youVisible = visibleRows.some((e) => e.kind === 'current');
-          if (!passed) return null;
-          if (youVisible) return <div className="leaderboard-msg">You made the board!</div>;
-          // User not in displayed slice — show their position below
-          const fullRank = leaderboard.findIndex((e) => e.kind === 'current');
-          const rank = fullRank >= 0 ? fullRank + 1 : offBoardRank?.rank;
-          const capped = fullRank < 0 && offBoardRank?.capped;
-          if (!rank) return null;
-          return (
-            <>
-              <div className="leaderboard-msg leaderboard-miss">Not fast enough this time...</div>
-              <div className="leaderboard-row leaderboard-off-board">
-                <span className="leaderboard-rank">
-                  #{rank}
-                  {capped && '+'}
-                </span>
-                <span className="leaderboard-label">YOU</span>
-                <span className="leaderboard-time">{formatTime(totalTimeMs)}</span>
-              </div>
-            </>
-          );
-        })()}
+      <LeaderboardTable
+        rows={leaderboard}
+        displayLimit={displayLimit}
+        passed={passed}
+        totalTimeMs={totalTimeMs}
+        offBoardRank={offBoardRank}
+      />
+    </div>
+  );
+}
+
+function LeaderboardTable({
+  rows,
+  displayLimit,
+  passed,
+  totalTimeMs,
+  offBoardRank,
+}: {
+  rows: LeaderboardRow[];
+  displayLimit: number;
+  passed: boolean;
+  totalTimeMs: number;
+  offBoardRank: { rank: number; capped: boolean } | null;
+}) {
+  return (
+    <div className="leaderboard">
+      <div className="leaderboard-title">Today&apos;s Top Times</div>
+      <div className="leaderboard-rows">
+        {rows.slice(0, displayLimit).map((entry) => (
+          <div
+            key={`${entry.kind}-${entry.rank}`}
+            className={[
+              'leaderboard-row',
+              entry.kind === 'current' && 'leaderboard-current',
+              entry.kind === 'pr' && 'leaderboard-pr',
+            ]
+              .filter(Boolean)
+              .join(' ')}
+          >
+            <span className="leaderboard-rank">#{entry.rank}</span>
+            <span className="leaderboard-label">{entry.label}</span>
+            <span className="leaderboard-time">{formatTime(entry.timeMs)}</span>
+          </div>
+        ))}
       </div>
+      {(() => {
+        const visibleRows = rows.slice(0, displayLimit);
+        const youVisible = visibleRows.some((e) => e.kind === 'current');
+        if (!passed) return null;
+        if (youVisible) return <div className="leaderboard-msg">You made the board!</div>;
+        const fullRank = rows.findIndex((e) => e.kind === 'current');
+        const rank = fullRank >= 0 ? fullRank + 1 : offBoardRank?.rank;
+        const capped = fullRank < 0 && offBoardRank?.capped;
+        if (!rank) return null;
+        return (
+          <>
+            <div className="leaderboard-msg leaderboard-miss">Not fast enough this time...</div>
+            <div className="leaderboard-row leaderboard-off-board">
+              <span className="leaderboard-rank">
+                #{rank}
+                {capped && '+'}
+              </span>
+              <span className="leaderboard-label">YOU</span>
+              <span className="leaderboard-time">{formatTime(totalTimeMs)}</span>
+            </div>
+          </>
+        );
+      })()}
     </div>
   );
 }

@@ -69,6 +69,15 @@ export class QdrantClient {
     await client.upsert(collection, { points: request.points });
   }
 
+  async setPayload(
+    collection: string,
+    payload: Record<string, unknown>,
+    pointIds: (string | number)[]
+  ): Promise<void> {
+    const client = await this.getClient();
+    await client.setPayload(collection, { payload, points: pointIds });
+  }
+
   async collectionExists(collection: string): Promise<boolean> {
     const client = await this.getClient();
     const result = await client.collectionExists(collection);
@@ -88,6 +97,31 @@ export class QdrantClient {
   async deleteCollection(collection: string): Promise<void> {
     const client = await this.getClient();
     await client.deleteCollection(collection);
+  }
+
+  async scroll(
+    collection: string,
+    options: {
+      limit?: number;
+      offset?: string | number | null;
+      with_payload?: boolean;
+      with_vector?: boolean;
+    }
+  ): Promise<{
+    points: Array<{ id: string | number; payload?: Record<string, unknown>; vector?: number[] }>;
+    next_page_offset: string | number | null;
+  }> {
+    const client = await this.getClient();
+    const result = await client.scroll(collection, {
+      limit: options.limit ?? 100,
+      offset: options.offset ?? undefined,
+      with_payload: options.with_payload ?? true,
+      with_vector: options.with_vector ?? false,
+    });
+    return result as {
+      points: Array<{ id: string | number; payload?: Record<string, unknown>; vector?: number[] }>;
+      next_page_offset: string | number | null;
+    };
   }
 
   async collectionInfo(collection: string): Promise<{ points_count: number; status: string }> {

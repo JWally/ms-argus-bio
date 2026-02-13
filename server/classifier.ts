@@ -22,6 +22,9 @@ export interface ClassifyResult {
  * - humanScore <= 0.3 → verdict bot
  * - Otherwise → uncertain
  * - Cold start (no neighbors) → fall back to heuristic label
+ *
+ * Heuristic veto: if the heuristic says "bot", kNN cannot override to "human".
+ * This prevents poisoned training data from laundering bot submissions.
  */
 export function classify(
   neighbors: VectorSearchResult[],
@@ -76,6 +79,13 @@ export function classify(
   } else {
     verdict = 'uncertain';
     confidence = 1 - Math.abs(humanScore - 0.5) * 2; // peaks at 0.5
+  }
+
+  // Heuristic veto: if the heuristic says "bot", kNN cannot override to
+  // "human". This prevents poisoned training data (bot vectors labeled
+  // "human") from laundering future bot submissions through kNN voting.
+  if (heuristicFallback === 'bot' && verdict === 'human') {
+    return { verdict: 'bot', confidence: 0.8, neighborCount: qualified.length };
   }
 
   return { verdict, confidence, neighborCount: qualified.length };

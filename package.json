@@ -18,6 +18,7 @@
     "quality": "npm run lint && npm run dead-code && npm run duplication",
     "preview": "vite preview",
     "train": "tsx scripts/train.ts",
+    "train:emnist": "tsx scripts/train-emnist.ts",
     "build:site": "VITE_API_URL=https://api-bio-dev-jw.argus.pw npm run build",
     "deploy": "npm run build:site && npm run cdk:deploy",
     "cdk:deploy": "npx cdk deploy --require-approval never",
@@ -27,11 +28,14 @@
   "dependencies": {
     "@aws-lambda-powertools/logger": "^2.12.0",
     "@aws-lambda-powertools/metrics": "^2.12.0",
+    "@aws-sdk/client-dynamodb": "^3.989.0",
     "@aws-sdk/client-secrets-manager": "^3.700.0",
+    "@aws-sdk/lib-dynamodb": "^3.989.0",
     "@qdrant/js-client-rest": "^1.13.0",
     "@tensorflow/tfjs": "^4.22.0",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "react-dom": "^19.2.0",
+    "react-router-dom": "^7.13.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
@@ -45,6 +49,7 @@
     "@vitejs/plugin-react": "^5.1.1",
     "@vitest/coverage-v8": "^4.0.18",
     "aws-cdk-lib": "^2.178.0",
+    "aws-sdk-client-mock": "^4.1.0",
     "constructs": "^10.4.2",
     "eslint": "^9.39.1",
     "eslint-config-prettier": "^10.1.8",

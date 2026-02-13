@@ -163,7 +163,7 @@ const DrawingCanvas = forwardRef<CanvasHandle, Props>(({ disabled, idle }, ref) 
 
   const onPointerDown = useCallback(
     (e: React.PointerEvent) => {
-      if (disabled) return;
+      if (disabled || !e.isTrusted) return;
       e.preventDefault();
       canvasRef.current!.setPointerCapture(e.pointerId);
       inputTypeRef.current = e.pointerType;
@@ -192,7 +192,7 @@ const DrawingCanvas = forwardRef<CanvasHandle, Props>(({ disabled, idle }, ref) 
 
   const onPointerMove = useCallback(
     (e: React.PointerEvent) => {
-      if (!currentStrokeRef.current || disabled) return;
+      if (!currentStrokeRef.current || disabled || !e.isTrusted) return;
       e.preventDefault();
       const pos = getPos(e);
       const point: StrokePoint = {

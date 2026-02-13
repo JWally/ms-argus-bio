@@ -1,9 +1,10 @@
 // server/embedding.ts
-// BiometricPayload → 64d vector encoding
+// BiometricPayload → 66d vector encoding
 
 import type { BiometricPayload, NormalizedStroke } from './types';
+import { timingCV } from './heuristics';
 
-const EMBEDDING_DIMS = 64;
+const EMBEDDING_DIMS = 66;
 
 /** Clamp value to [0, 1] after min-max normalization */
 function norm(value: number, min: number, max: number): number {
@@ -97,7 +98,7 @@ function digitShapeFeatures(strokes: NormalizedStroke[]): number[] {
 }
 
 /**
- * Encode a BiometricPayload into a 64-dimensional feature vector.
+ * Encode a BiometricPayload into a 66-dimensional feature vector.
  * All features are min-max normalized to [0, 1].
  */
 // eslint-disable-next-line complexity, sonarjs/cognitive-complexity
@@ -305,6 +306,28 @@ export function encode(payload: BiometricPayload): number[] {
   vec.push(norm(payload.screenHeight, 0, 2160));
   vec.push(norm(payload.devicePixelRatio, 1, 4));
 
+  // ── Dim 64: Synthetic event detection (1d) ──
+  // Ratio of consecutive point pairs with dt < 1ms. Real browser pointer
+  // events are dispatched at most once per frame (~8-16ms), so this is
+  // always ~0 for humans. Synthetic dispatchEvent() produces bursts at dt ≈ 0.
+  let zeroDtPairs = 0;
+  let totalPairs = 0;
+  for (const digit of payload.digits) {
+    for (const stroke of digit.strokes) {
+      for (let i = 1; i < stroke.points.length; i++) {
+        totalPairs++;
+        if (stroke.points[i].t - stroke.points[i - 1].t < 1) zeroDtPairs++;
+      }
+    }
+  }
+  vec.push(totalPairs > 0 ? zeroDtPairs / totalPairs : 0);
+
+  // ── Dim 65: Timing regularity (1d) ──
+  // Coefficient of variation of inter-point dt. Real humans have irregular
+  // timing (CV > 0.5). Playwright steps produces metronomic timing (CV < 0.3).
+  // Clamped to [0, 3] for normalization — higher = more irregular = more human.
+  vec.push(norm(timingCV(payload), 0, 3));
+
   // Sanity check
   if (vec.length !== EMBEDDING_DIMS) {
     throw new Error(`Embedding dimension mismatch: expected ${EMBEDDING_DIMS}, got ${vec.length}`);
@@ -313,5 +336,5 @@ export function encode(payload: BiometricPayload): number[] {
   return vec;
 }
 
-export const EMBEDDING_VERSION = 'v1';
+export const EMBEDDING_VERSION = 'v3';
 export { EMBEDDING_DIMS };

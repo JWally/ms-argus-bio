@@ -13,6 +13,7 @@ import * as logs from 'aws-cdk-lib/aws-logs';
 import * as ssm from 'aws-cdk-lib/aws-ssm';
 import * as apigatewayv2 from 'aws-cdk-lib/aws-apigatewayv2';
 import * as integrations from 'aws-cdk-lib/aws-apigatewayv2-integrations';
+import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as s3deploy from 'aws-cdk-lib/aws-s3-deployment';
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
@@ -103,6 +104,38 @@ export class BioStack extends Stack {
     });
 
     // =========================================================================
+    // DYNAMODB TABLES
+    // =========================================================================
+
+    const merchantsTable = new dynamodb.Table(this, 'MerchantsTable', {
+      tableName: `${stackName}-merchants`,
+      partitionKey: { name: 'merchantId', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      removalPolicy: RemovalPolicy.DESTROY,
+    });
+    merchantsTable.addGlobalSecondaryIndex({
+      indexName: 'apiKeyHash-index',
+      partitionKey: { name: 'apiKeyHash', type: dynamodb.AttributeType.STRING },
+      projectionType: dynamodb.ProjectionType.ALL,
+    });
+
+    const sessionsTable = new dynamodb.Table(this, 'SessionsTable', {
+      tableName: `${stackName}-sessions`,
+      partitionKey: { name: 'sessionId', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      removalPolicy: RemovalPolicy.DESTROY,
+      timeToLiveAttribute: 'ttl',
+    });
+
+    const tokensTable = new dynamodb.Table(this, 'TokensTable', {
+      tableName: `${stackName}-tokens`,
+      partitionKey: { name: 'token', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      removalPolicy: RemovalPolicy.DESTROY,
+      timeToLiveAttribute: 'ttl',
+    });
+
+    // =========================================================================
     // LAMBDA FUNCTION
     // =========================================================================
 
@@ -122,6 +155,10 @@ export class BioStack extends Stack {
         QDRANT_URL: qdrantUrl,
         QDRANT_SECRET_ARN: qdrantSecretArn,
         STAGE: stage,
+        MERCHANTS_TABLE: merchantsTable.tableName,
+        SESSIONS_TABLE: sessionsTable.tableName,
+        TOKENS_TABLE: tokensTable.tableName,
+        SITE_DOMAIN: siteDomainName,
       },
     });
 
@@ -133,6 +170,11 @@ export class BioStack extends Stack {
         resources: ['arn:aws:secretsmanager:*:*:secret:argus-vector/*'],
       })
     );
+
+    // Grant DynamoDB access for CaaS tables
+    merchantsTable.grantReadWriteData(classifyFn);
+    sessionsTable.grantReadWriteData(classifyFn);
+    tokensTable.grantReadWriteData(classifyFn);
 
     // =========================================================================
     // HTTP API GATEWAY
@@ -158,7 +200,19 @@ export class BioStack extends Stack {
     );
 
     httpApi.addRoutes({
+      path: '/v1/session',
+      methods: [apigatewayv2.HttpMethod.POST],
+      integration: lambdaIntegration,
+    });
+
+    httpApi.addRoutes({
       path: '/v1/classify',
+      methods: [apigatewayv2.HttpMethod.POST],
+      integration: lambdaIntegration,
+    });
+
+    httpApi.addRoutes({
+      path: '/v1/verify',
       methods: [apigatewayv2.HttpMethod.POST],
       integration: lambdaIntegration,
     });
@@ -178,6 +232,18 @@ export class BioStack extends Stack {
     httpApi.addRoutes({
       path: '/admin/stats',
       methods: [apigatewayv2.HttpMethod.GET],
+      integration: lambdaIntegration,
+    });
+
+    httpApi.addRoutes({
+      path: '/admin/scroll',
+      methods: [apigatewayv2.HttpMethod.GET],
+      integration: lambdaIntegration,
+    });
+
+    httpApi.addRoutes({
+      path: '/admin/relabel',
+      methods: [apigatewayv2.HttpMethod.POST],
       integration: lambdaIntegration,
     });
 
@@ -270,16 +336,24 @@ export class BioStack extends Stack {
         allowedMethods: cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
       },
       additionalBehaviors: Object.fromEntries(
-        ['*.js', '*.css', '*.woff*', '*.png', '*.jpg', '*.svg', '*.wasm', 'model/*'].map(
-          (pattern) => [
-            pattern,
-            {
-              origin: s3Origin,
-              cachePolicy: staticAssetsCachePolicy,
-              viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
-            },
-          ]
-        )
+        [
+          '*.js',
+          '*.css',
+          '*.woff*',
+          '*.png',
+          '*.jpg',
+          '*.svg',
+          '*.wasm',
+          'model/*',
+          'model-emnist/*',
+        ].map((pattern) => [
+          pattern,
+          {
+            origin: s3Origin,
+            cachePolicy: staticAssetsCachePolicy,
+            viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+          },
+        ])
       ),
       domainNames: [siteDomainName],
       certificate: siteCertificate,

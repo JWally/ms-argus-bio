@@ -35,7 +35,13 @@ body {
 #root {
   width: 100%;
   max-width: 600px;
-  padding: 2rem;
+  padding: 1rem 0.5rem;
+}
+
+@media (min-width: 768px) {
+  #root {
+    padding: 2rem;
+  }
 }
 
 .app {

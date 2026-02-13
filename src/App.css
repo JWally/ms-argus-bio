@@ -560,11 +560,5 @@ main {
   flex-direction: column;
   align-items: center;
   width: 100%;
-  --canvas-size: 280px;
-}
-
-@media (min-width: 768px) {
-  main {
-    --canvas-size: 400px;
-  }
+  --canvas-size: min(calc(100vw - 1rem), 420px);
 }

@@ -71,6 +71,56 @@ export interface Verdict {
   verdict: Label;
   confidence: number;
   neighborCount: number;
-  heuristicLabel: Label;
   challengeId: string;
+}
+
+// ── CAPTCHA-as-a-Service types ──
+
+export interface Merchant {
+  merchantId: string;
+  name: string;
+  apiKeyHash: string;
+  apiKeyPrefix: string;
+  allowedReturnUrls: string[];
+  active: boolean;
+  createdAt: number;
+}
+
+export interface Session {
+  sessionId: string;
+  merchantId: string;
+  returnUrl: string;
+  challenge: number[];
+  status: 'pending' | 'completed' | 'expired';
+  createdAt: number;
+  ttl: number;
+}
+
+export interface Token {
+  token: string;
+  sessionId: string;
+  merchantId: string;
+  verdict: Label;
+  confidence: number;
+  redeemed: boolean;
+  createdAt: number;
+  ttl: number;
+}
+
+export interface SessionResponse {
+  sessionId: string;
+  captchaUrl: string;
+}
+
+export interface VerifyResponse {
+  success: boolean;
+  verdict?: Label;
+  confidence?: number;
+  sessionId?: string;
+  timestamp?: number;
+}
+
+export interface ClassifyResponse extends Verdict {
+  token?: string;
+  returnUrl?: string;
 }
