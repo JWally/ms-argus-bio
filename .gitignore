@@ -14,7 +14,6 @@ dist-ssr
 
 # CDK
 cdk.out
-cdk.context.json
 
 # EMNIST training cache
 .emnist-cache

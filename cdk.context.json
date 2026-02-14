@@ -1,0 +1,51 @@
+{
+  "hosted-zone:account=263318538229:domainName=argus.pw:region=us-east-1": {
+    "Id": "/hostedzone/Z0810341271UXTLGDMLC6",
+    "Name": "argus.pw."
+  },
+  "ssm:account=263318538229:parameterName=/argus/dev-jw/vpc-id:region=us-east-1": "vpc-0d1b9e909139dafd0",
+  "vpc-provider:account=263318538229:filter.vpc-id=vpc-0d1b9e909139dafd0:region=us-east-1:returnAsymmetricSubnets=true": {
+    "vpcId": "vpc-0d1b9e909139dafd0",
+    "vpcCidrBlock": "10.100.0.0/16",
+    "ownerAccountId": "263318538229",
+    "availabilityZones": [],
+    "subnetGroups": [
+      {
+        "name": "Public",
+        "type": "Public",
+        "subnets": [
+          {
+            "subnetId": "subnet-0c0d79062b3d032f2",
+            "cidr": "10.100.0.0/24",
+            "availabilityZone": "us-east-1a",
+            "routeTableId": "rtb-0d202b15bc9bfdaf4"
+          },
+          {
+            "subnetId": "subnet-0ab4e7ee77635cfea",
+            "cidr": "10.100.1.0/24",
+            "availabilityZone": "us-east-1b",
+            "routeTableId": "rtb-075d4ec7919049890"
+          }
+        ]
+      },
+      {
+        "name": "Private",
+        "type": "Private",
+        "subnets": [
+          {
+            "subnetId": "subnet-0a4ad2d4fa8d7c23e",
+            "cidr": "10.100.2.0/24",
+            "availabilityZone": "us-east-1a",
+            "routeTableId": "rtb-07c960dade288af18"
+          },
+          {
+            "subnetId": "subnet-04dbeda4c07779853",
+            "cidr": "10.100.3.0/24",
+            "availabilityZone": "us-east-1b",
+            "routeTableId": "rtb-07cca3a15bbaf38b8"
+          }
+        ]
+      }
+    ]
+  }
+}
