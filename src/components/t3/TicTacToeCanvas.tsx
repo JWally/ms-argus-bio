@@ -1,5 +1,6 @@
 import { forwardRef, useRef, useImperativeHandle, useEffect, useCallback } from 'react';
 import type { Board, WinLine, GamePhase } from '../../game/t3-types';
+import type { Stroke, StrokePoint } from '../DrawingCanvas';
 
 /** Internal resolution of the canvas: 3 cells x CELL_SIZE */
 const CELL_SIZE = 140;
@@ -13,8 +14,12 @@ const DISSOLVE_MS = 400;
 
 export interface T3CanvasHandle {
   getCanvas: () => HTMLCanvasElement | null;
-  /** Get strokes drawn in the currently active cell */
+  /** Get strokes drawn in the currently active cell (render-only {x,y}) */
   getCellStrokes: () => { x: number; y: number }[][];
+  /** Get rich biometric strokes for the current cell */
+  getRichStrokes: () => Stroke[];
+  /** Get pointer input type (mouse/touch/pen) */
+  getInputType: () => string;
   clearCell: (cellIndex: number) => void;
   /** Fade out current strokes over DISSOLVE_MS, then clear */
   dissolveCell: () => void;
@@ -231,13 +236,21 @@ const TicTacToeCanvas = forwardRef<T3CanvasHandle, Props>(
     // Dissolve animation tracking
     const dissolveStartRef = useRef<number | null>(null);
     const dissolveRafRef = useRef(0);
+    // Rich biometric stroke tracking (parallel to cellStrokesRef)
+    const richStrokesRef = useRef<Stroke[]>([]);
+    const currentRichStrokeRef = useRef<StrokePoint[] | null>(null);
+    const inputTypeRef = useRef('mouse');
 
     useImperativeHandle(ref, () => ({
       getCanvas: () => canvasRef.current,
       getCellStrokes: () => [...cellStrokesRef.current],
+      getRichStrokes: () => [...richStrokesRef.current],
+      getInputType: () => inputTypeRef.current,
       clearCell: (_cellIndex: number) => {
         cellStrokesRef.current = [];
         currentStrokeRef.current = null;
+        richStrokesRef.current = [];
+        currentRichStrokeRef.current = null;
         dissolveStartRef.current = null;
         cancelAnimationFrame(dissolveRafRef.current);
       },
@@ -251,6 +264,8 @@ const TicTacToeCanvas = forwardRef<T3CanvasHandle, Props>(
           if (performance.now() - start >= DISSOLVE_MS) {
             cellStrokesRef.current = [];
             currentStrokeRef.current = null;
+            richStrokesRef.current = [];
+            currentRichStrokeRef.current = null;
             dissolveStartRef.current = null;
             renderFnRef.current();
           } else {
@@ -272,6 +287,8 @@ const TicTacToeCanvas = forwardRef<T3CanvasHandle, Props>(
       if (prevSelectedRef.current !== null && prevSelectedRef.current !== selectedCell) {
         cellStrokesRef.current = [];
         currentStrokeRef.current = null;
+        richStrokesRef.current = [];
+        currentRichStrokeRef.current = null;
       }
       prevSelectedRef.current = selectedCell;
     }, [selectedCell]);
@@ -374,12 +391,26 @@ const TicTacToeCanvas = forwardRef<T3CanvasHandle, Props>(
 
         if (phase !== 'human-draw') return;
 
+        inputTypeRef.current = e.pointerType;
+        const richPoint: StrokePoint = {
+          x: pos.x,
+          y: pos.y,
+          t: performance.now(),
+          pressure: e.pressure,
+          tiltX: e.tiltX,
+          tiltY: e.tiltY,
+          width: e.width,
+          height: e.height,
+        };
+
         // Cancel any active dissolve — user is drawing again
         if (dissolveStartRef.current !== null) {
           dissolveStartRef.current = null;
           cancelAnimationFrame(dissolveRafRef.current);
           cellStrokesRef.current = [];
           currentStrokeRef.current = null;
+          richStrokesRef.current = [];
+          currentRichStrokeRef.current = null;
         }
 
         const activeCell = selectedCell ?? pendingCellRef.current;
@@ -389,6 +420,7 @@ const TicTacToeCanvas = forwardRef<T3CanvasHandle, Props>(
           canvasRef.current!.setPointerCapture(e.pointerId);
           drawingRef.current = true;
           currentStrokeRef.current = [{ x: pos.x, y: pos.y }];
+          currentRichStrokeRef.current = [richPoint];
           render();
           return;
         }
@@ -399,11 +431,14 @@ const TicTacToeCanvas = forwardRef<T3CanvasHandle, Props>(
           // Clear old strokes when switching cells
           cellStrokesRef.current = [];
           currentStrokeRef.current = null;
+          richStrokesRef.current = [];
+          currentRichStrokeRef.current = null;
           pendingCellRef.current = cellIdx;
           onCellSelect(cellIdx);
           canvasRef.current!.setPointerCapture(e.pointerId);
           drawingRef.current = true;
           currentStrokeRef.current = [{ x: pos.x, y: pos.y }];
+          currentRichStrokeRef.current = [richPoint];
           render();
         }
       },
@@ -424,6 +459,16 @@ const TicTacToeCanvas = forwardRef<T3CanvasHandle, Props>(
         }
 
         currentStrokeRef.current.push({ x: pos.x, y: pos.y });
+        currentRichStrokeRef.current?.push({
+          x: pos.x,
+          y: pos.y,
+          t: performance.now(),
+          pressure: e.pressure,
+          tiltX: e.tiltX,
+          tiltY: e.tiltY,
+          width: e.width,
+          height: e.height,
+        });
         render();
       },
       [getCanvasPos, selectedCell, render]
@@ -437,7 +482,16 @@ const TicTacToeCanvas = forwardRef<T3CanvasHandle, Props>(
         if (currentStrokeRef.current && currentStrokeRef.current.length > 0) {
           cellStrokesRef.current.push(currentStrokeRef.current);
         }
+        if (currentRichStrokeRef.current && currentRichStrokeRef.current.length > 0) {
+          const pts = currentRichStrokeRef.current;
+          richStrokesRef.current.push({
+            points: pts,
+            startTime: pts[0].t,
+            endTime: pts[pts.length - 1].t,
+          });
+        }
         currentStrokeRef.current = null;
+        currentRichStrokeRef.current = null;
         render();
         onStrokeEnd();
       },

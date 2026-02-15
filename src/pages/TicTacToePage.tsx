@@ -1,4 +1,4 @@
-import { useReducer, useEffect, useRef, useCallback } from 'react';
+import { useReducer, useEffect, useRef, useCallback, useState } from 'react';
 import * as tf from '@tensorflow/tfjs';
 import { loadLetterModel, predictLetter } from '../ml/letter-model';
 import TicTacToeCanvas, { type T3CanvasHandle, CELL_SIZE } from '../components/t3/TicTacToeCanvas';
@@ -6,13 +6,28 @@ import GameStatus from '../components/t3/GameStatus';
 import GameOverPanel from '../components/t3/GameOverPanel';
 import { checkWinner, getEmptyCells, isDraw, getAIMove, randomLetter } from '../game/t3-engine';
 import type { GameState, GameAction, Board } from '../game/t3-types';
+import type { Stroke } from '../components/DrawingCanvas';
+import { computeFeatures, normalizeStrokes, type VerdictResult } from '../utils/biometrics';
+import { renderTo28x28 } from '../ml/preprocess';
 import { formatTime } from '../components/Leaderboard';
 import '../styles/t3.css';
+
+const API_URL = import.meta.env.VITE_API_URL as string | undefined;
 
 const CONFIDENCE_THRESHOLD = 0.6;
 const TARGET_CONFIDENCE_THRESHOLD = 0.3;
 const AI_DELAY_MS = 500;
 const AUTO_SUBMIT_MS = 2500;
+const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+
+interface TurnStrokeData {
+  cellIndex: number;
+  targetLetter: string;
+  recognizedLetter: string;
+  confidence: number;
+  strokes: Stroke[];
+  imageData: number[];
+}
 
 function initialState(): GameState {
   return {
@@ -201,12 +216,32 @@ function reducer(state: GameState, action: GameAction): GameState {
   }
 }
 
+/** Extract 28x28 grayscale image data from a cell region of the canvas */
+function getCellImageData(canvas: HTMLCanvasElement, cellIndex: number): number[] {
+  const col = cellIndex % 3;
+  const row = Math.floor(cellIndex / 3);
+  const region = { sx: col * CELL_SIZE, sy: row * CELL_SIZE, sw: CELL_SIZE, sh: CELL_SIZE };
+  const { outCanvas, empty } = renderTo28x28(canvas, region, 15);
+  if (empty) return new Array(784).fill(0);
+  const outData = outCanvas.getContext('2d')!.getImageData(0, 0, 28, 28);
+  const result: number[] = [];
+  for (let i = 0; i < 784; i++) {
+    result.push(outData.data[i * 4] / 255);
+  }
+  return result;
+}
+
 export default function TicTacToePage() {
   const [state, dispatch] = useReducer(reducer, undefined, initialState);
+  const [verdict, setVerdict] = useState<VerdictResult | null>(null);
   const modelRef = useRef<tf.LayersModel | null>(null);
   const canvasRef = useRef<T3CanvasHandle>(null);
   const autoSubmitTimerRef = useRef(0);
   const rafRef = useRef(0);
+  // Biometric data accumulation
+  const allStrokesRef = useRef<Stroke[]>([]);
+  const turnDataRef = useRef<TurnStrokeData[]>([]);
+  const gameStartTimeRef = useRef(0);
 
   // Load model on mount
   useEffect(() => {
@@ -242,10 +277,76 @@ export default function TicTacToePage() {
     return () => clearTimeout(timer);
   }, [state.phase, state.board]);
 
+  // Send biometric payload when game ends
+  const sendBiometricPayload = useCallback(() => {
+    if (!API_URL) return;
+
+    const allStrokes = allStrokesRef.current;
+    const turnData = turnDataRef.current;
+    const startTime = gameStartTimeRef.current;
+    const inputType = canvasRef.current?.getInputType() ?? 'unknown';
+
+    const payload = {
+      challengeId: crypto.randomUUID(),
+      challenge: turnData.map((t) => LETTERS.indexOf(t.targetLetter)),
+      timestamp: Date.now(),
+      completionTimeMs: state.elapsedMs,
+      passed: state.winner === 'human',
+      digits: turnData.map((t) => ({
+        target: LETTERS.indexOf(t.targetLetter),
+        recognized: LETTERS.indexOf(t.recognizedLetter),
+        confidence: t.confidence,
+        timeMs: 0,
+        strokes: normalizeStrokes(t.strokes, startTime, CELL_SIZE),
+        imageData: t.imageData,
+      })),
+      confidenceTimeline: [],
+      inputType,
+      screenWidth: window.screen.width,
+      screenHeight: window.screen.height,
+      devicePixelRatio: window.devicePixelRatio,
+      userAgent: navigator.userAgent,
+      features: computeFeatures(allStrokes),
+      gameMode: 't3',
+    };
+
+    // eslint-disable-next-line no-console
+    console.log('[ARGUS T3] Biometric Payload', payload);
+
+    fetch(`${API_URL}/v1/classify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+      .then((res) => res.json())
+      .then((v) => {
+        // eslint-disable-next-line no-console
+        console.log('[ARGUS T3] Verdict', v);
+        setVerdict(v as VerdictResult);
+      })
+      .catch((err) => {
+        // eslint-disable-next-line no-console
+        console.error('[ARGUS T3] Classification error', err);
+      });
+  }, [state.elapsedMs, state.winner]);
+
+  // Trigger payload send on game-over
+  const prevPhaseRef = useRef(state.phase);
+  useEffect(() => {
+    if (prevPhaseRef.current !== 'game-over' && state.phase === 'game-over') {
+      sendBiometricPayload();
+    }
+    prevPhaseRef.current = state.phase;
+  }, [state.phase, sendBiometricPayload]);
+
   // ── Recognition helpers ─────────────────────────────────────────────
 
   /** Try to recognize the current cell — returns match or null */
-  const tryRecognize = useCallback((): { cellIndex: number; letter: string } | null => {
+  const tryRecognize = useCallback((): {
+    cellIndex: number;
+    letter: string;
+    confidence: number;
+  } | null => {
     if (state.phase !== 'human-draw' || state.selectedCell === null || !modelRef.current)
       return null;
 
@@ -264,7 +365,6 @@ export default function TicTacToePage() {
     });
 
     // Targeted verification: check confidence of the specific letter we asked for
-    const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
     const targetIdx = LETTERS.indexOf(state.targetLetter);
     const targetConf = allConfidences[targetIdx];
 
@@ -279,23 +379,45 @@ export default function TicTacToePage() {
       (letter === state.targetLetter && confidence >= CONFIDENCE_THRESHOLD) ||
       targetConf >= TARGET_CONFIDENCE_THRESHOLD
     ) {
-      return { cellIndex, letter: state.targetLetter };
+      return { cellIndex, letter: state.targetLetter, confidence: targetConf };
     }
     return null;
   }, [state.phase, state.selectedCell, state.targetLetter]);
+
+  /** Collect rich strokes + imageData for the current cell turn */
+  const collectTurnData = useCallback(
+    (cellIndex: number, targetLetter: string, recognizedLetter: string, confidence: number) => {
+      const richStrokes = canvasRef.current?.getRichStrokes() ?? [];
+      allStrokesRef.current.push(...richStrokes);
+
+      const canvas = canvasRef.current?.getCanvas();
+      const imageData = canvas ? getCellImageData(canvas, cellIndex) : new Array(784).fill(0);
+
+      turnDataRef.current.push({
+        cellIndex,
+        targetLetter,
+        recognizedLetter,
+        confidence,
+        strokes: richStrokes,
+        imageData,
+      });
+    },
+    []
+  );
 
   /** Force submit — dispatches FAIL if recognition doesn't pass */
   const handleSubmit = useCallback(() => {
     clearTimeout(autoSubmitTimerRef.current);
     const result = tryRecognize();
     if (result) {
+      collectTurnData(result.cellIndex, state.targetLetter, result.letter, result.confidence);
       const strokes = canvasRef.current?.getCellStrokes() ?? [];
       dispatch({ type: 'RECOGNIZE_SUCCESS', ...result, strokes });
     } else if (state.selectedCell !== null) {
       dispatch({ type: 'RECOGNIZE_FAIL' });
       canvasRef.current?.dissolveCell();
     }
-  }, [tryRecognize, state.selectedCell]);
+  }, [tryRecognize, state.selectedCell, state.targetLetter, collectTurnData]);
 
   /** Called on every stroke end — tries instant recognition, falls back to timer */
   const handleStrokeEnd = useCallback(() => {
@@ -305,6 +427,7 @@ export default function TicTacToePage() {
     const result = tryRecognize();
     if (result) {
       clearTimeout(autoSubmitTimerRef.current);
+      collectTurnData(result.cellIndex, state.targetLetter, result.letter, result.confidence);
       const strokes = canvasRef.current?.getCellStrokes() ?? [];
       dispatch({ type: 'RECOGNIZE_SUCCESS', ...result, strokes });
       return;
@@ -315,11 +438,12 @@ export default function TicTacToePage() {
     autoSubmitTimerRef.current = window.setTimeout(() => {
       handleSubmit();
     }, AUTO_SUBMIT_MS);
-  }, [state.phase, tryRecognize, handleSubmit]);
+  }, [state.phase, state.targetLetter, tryRecognize, handleSubmit, collectTurnData]);
 
   const handleCellSelect = useCallback(
     (cellIndex: number) => {
       if (state.phase === 'idle') {
+        gameStartTimeRef.current = performance.now();
         dispatch({ type: 'START_GAME' });
         return;
       }
@@ -332,6 +456,9 @@ export default function TicTacToePage() {
 
   const handlePlayAgain = useCallback(() => {
     canvasRef.current?.clearCell(-1); // clear all
+    allStrokesRef.current = [];
+    turnDataRef.current = [];
+    setVerdict(null);
     dispatch({ type: 'RESET' });
   }, []);
 
@@ -383,6 +510,7 @@ export default function TicTacToePage() {
             <GameOverPanel
               winner={state.winner}
               elapsedMs={state.elapsedMs}
+              verdict={verdict}
               onPlayAgain={handlePlayAgain}
             />
           )}

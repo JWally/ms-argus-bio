@@ -224,40 +224,40 @@ async function handleClassify(event: APIGatewayProxyEventV2): Promise<APIGateway
       (heuristicAgrees || isColdStart)
     ) {
       // Near-duplicate check: reject vectors > 0.95 cosine similarity
-      const dupeCheck = await client.search(COLLECTION_NAME, {
-        vector: embedding,
-        limit: 1,
-        score_threshold: 0.95,
-      });
+      // const dupeCheck = await client.search(COLLECTION_NAME, {
+      //   vector: embedding,
+      //   limit: 1,
+      //   score_threshold: 0.95,
+      // });
 
-      if (dupeCheck.length === 0) {
-        const pointId = crypto.randomUUID();
-        await client.upsert(COLLECTION_NAME, {
-          points: [
-            {
-              id: pointId,
-              vector: embedding,
-              payload: {
-                label: result.verdict,
-                challengeId: payload.challengeId,
-                timestamp: payload.timestamp,
-                inputType: payload.inputType,
-                passed: payload.passed,
-                completionTimeMs: payload.completionTimeMs,
-                embeddingVersion: EMBEDDING_VERSION,
-                userAgent: payload.userAgent,
-              },
+      // if (dupeCheck.length === 0) {
+      const pointId = crypto.randomUUID();
+      await client.upsert(COLLECTION_NAME, {
+        points: [
+          {
+            id: pointId,
+            vector: embedding,
+            payload: {
+              label: result.verdict,
+              challengeId: payload.challengeId,
+              timestamp: payload.timestamp,
+              inputType: payload.inputType,
+              passed: payload.passed,
+              completionTimeMs: payload.completionTimeMs,
+              embeddingVersion: EMBEDDING_VERSION,
+              userAgent: payload.userAgent,
             },
-          ],
-        });
-        cachedPointCount++;
-        trained = true;
-      } else {
-        logger.info('Skipped training — near-duplicate vector', {
-          existingId: dupeCheck[0].id,
-          similarity: dupeCheck[0].score,
-        });
-      }
+          },
+        ],
+      });
+      cachedPointCount++;
+      trained = true;
+      // } else {
+      //   logger.info('Skipped training — near-duplicate vector', {
+      //     existingId: dupeCheck[0].id,
+      //     similarity: dupeCheck[0].score,
+      //   });
+      // }
     }
 
     const verdict: Verdict = {
