@@ -1,5 +1,5 @@
 import { forwardRef, useRef, useImperativeHandle, useEffect, useCallback } from 'react';
-import type { Board, WinLine, GamePhase } from '../../game/t3-types';
+import type { Board, WinLine, GamePhase, Player } from '../../game/t3-types';
 import type { Stroke, StrokePoint } from '../DrawingCanvas';
 
 /** Internal resolution of the canvas: 3 cells x CELL_SIZE */
@@ -29,6 +29,7 @@ interface Props {
   board: Board;
   selectedCell: number | null;
   winLine: WinLine | null;
+  winner: Player | 'draw' | null;
   phase: GamePhase;
   onCellSelect: (cellIndex: number) => void;
   onStrokeEnd: () => void;
@@ -217,12 +218,88 @@ function renderIdleOverlay(ctx: CanvasRenderingContext2D): void {
   ctx.restore();
 }
 
+// ── Celebration particles ─────────────────────────────────────────────
+
+const CELEBRATION_MS = 1000;
+const PARTICLE_COUNT = 24;
+
+interface Particle {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  radius: number;
+  alpha: number;
+}
+
+function spawnParticles(winLine: WinLine): Particle[] {
+  const particles: Particle[] = [];
+  for (const idx of winLine.indices) {
+    const center = cellCenter(idx);
+    for (let i = 0; i < PARTICLE_COUNT / 3; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 40 + Math.random() * 80;
+      particles.push({
+        x: center.x,
+        y: center.y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        radius: 2 + Math.random() * 4,
+        alpha: 1,
+      });
+    }
+  }
+  return particles;
+}
+
+function renderCelebration(
+  ctx: CanvasRenderingContext2D,
+  particles: Particle[],
+  progress: number,
+  winLine: WinLine
+): void {
+  // Glow pulse on win line
+  const start = cellCenter(winLine.indices[0]);
+  const end = cellCenter(winLine.indices[2]);
+  const pulse = 1 + 0.4 * Math.sin(progress * Math.PI * 4);
+  ctx.save();
+  ctx.strokeStyle = '#22c55e';
+  ctx.lineWidth = 6 * pulse;
+  ctx.lineCap = 'round';
+  ctx.shadowColor = 'rgba(34, 197, 94, 0.8)';
+  ctx.shadowBlur = 16 + 12 * pulse;
+  ctx.beginPath();
+  ctx.moveTo(start.x, start.y);
+  ctx.lineTo(end.x, end.y);
+  ctx.stroke();
+  ctx.restore();
+
+  // Particles
+  for (const p of particles) {
+    const t = progress;
+    const px = p.x + p.vx * t;
+    const py = p.y + p.vy * t;
+    const alpha = p.alpha * (1 - progress);
+    const radius = p.radius * (1 + progress * 0.5);
+    if (alpha <= 0) continue;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = '#22c55e';
+    ctx.shadowColor = 'rgba(34, 197, 94, 0.6)';
+    ctx.shadowBlur = 8;
+    ctx.beginPath();
+    ctx.arc(px, py, radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
 // ── Component ────────────────────────────────────────────────────────
 
 const DRAW_PHASES: GamePhase[] = ['human-draw', 'human-recognize'];
 
 const TicTacToeCanvas = forwardRef<T3CanvasHandle, Props>(
-  ({ board, selectedCell, winLine, phase, onCellSelect, onStrokeEnd }, ref) => {
+  ({ board, selectedCell, winLine, winner, phase, onCellSelect, onStrokeEnd }, ref) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const cellStrokesRef = useRef<Point[][]>([]);
     const currentStrokeRef = useRef<Point[] | null>(null);
@@ -240,6 +317,10 @@ const TicTacToeCanvas = forwardRef<T3CanvasHandle, Props>(
     const richStrokesRef = useRef<Stroke[]>([]);
     const currentRichStrokeRef = useRef<StrokePoint[] | null>(null);
     const inputTypeRef = useRef('mouse');
+    // Celebration animation
+    const celebrationStartRef = useRef<number | null>(null);
+    const celebrationParticlesRef = useRef<Particle[]>([]);
+    const celebrationRafRef = useRef(0);
 
     useImperativeHandle(ref, () => ({
       getCanvas: () => canvasRef.current,
@@ -311,7 +392,16 @@ const TicTacToeCanvas = forwardRef<T3CanvasHandle, Props>(
         const alpha = ds !== null ? Math.max(0, 1 - (performance.now() - ds) / DISSOLVE_MS) : 1;
         renderLiveStrokes(ctx, activeCell, cellStrokesRef.current, currentStrokeRef.current, alpha);
       }
-      if (winLine) renderWinLine(ctx, winLine);
+
+      // Win line: static for AI wins, animated celebration for human wins
+      const cStart = celebrationStartRef.current;
+      if (winLine && cStart !== null) {
+        const progress = Math.min(1, (performance.now() - cStart) / CELEBRATION_MS);
+        renderCelebration(ctx, celebrationParticlesRef.current, progress, winLine);
+      } else if (winLine) {
+        renderWinLine(ctx, winLine);
+      }
+
       if (phase === 'idle') renderIdleOverlay(ctx);
     }, [board, selectedCell, winLine, phase]);
 
@@ -361,6 +451,33 @@ const TicTacToeCanvas = forwardRef<T3CanvasHandle, Props>(
 
       return () => cancelAnimationFrame(morphRafRef.current);
     }, [board]);
+
+    // Trigger celebration particles when human wins
+    useEffect(() => {
+      if (!winLine || winner !== 'human') {
+        celebrationStartRef.current = null;
+        celebrationParticlesRef.current = [];
+        cancelAnimationFrame(celebrationRafRef.current);
+        return;
+      }
+
+      celebrationStartRef.current = performance.now();
+      celebrationParticlesRef.current = spawnParticles(winLine);
+
+      const loop = () => {
+        const start = celebrationStartRef.current;
+        if (start === null) return;
+        renderFnRef.current();
+        if (performance.now() - start < CELEBRATION_MS) {
+          celebrationRafRef.current = requestAnimationFrame(loop);
+        } else {
+          celebrationStartRef.current = null;
+        }
+      };
+      celebrationRafRef.current = requestAnimationFrame(loop);
+
+      return () => cancelAnimationFrame(celebrationRafRef.current);
+    }, [winLine, winner]);
 
     // ── Pointer events ───────────────────────────────────────────────
     const getCanvasPos = useCallback((e: React.PointerEvent): Point => {

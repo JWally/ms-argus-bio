@@ -1,13 +1,15 @@
-import type { GamePhase } from '../../game/t3-types';
+import type { Board, GamePhase } from '../../game/t3-types';
 
 interface Props {
   phase: GamePhase;
   targetLetter: string;
   message: string;
+  board: Board;
 }
 
-export default function GameStatus({ phase, targetLetter, message }: Props) {
+export default function GameStatus({ phase, targetLetter, message, board }: Props) {
   const showLetter = phase === 'human-draw' || phase === 'human-recognize';
+  const boardEmpty = board.every((c) => c === null);
 
   return (
     <div className="t3-status">
@@ -23,6 +25,10 @@ export default function GameStatus({ phase, targetLetter, message }: Props) {
           <span className="t3-status-label">Draw</span>
           <span className="t3-target-letter">{targetLetter}</span>
         </div>
+      )}
+
+      {showLetter && boardEmpty && (
+        <div className="t3-status-nudge">Tap a cell, draw the letter, then hit DONE</div>
       )}
 
       {phase === 'ai-turn' && (

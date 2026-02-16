@@ -39,22 +39,30 @@ export function isDraw(board: Board): boolean {
   return getEmptyCells(board).length === 0;
 }
 
+const BLUNDER_CHANCE = 0.4;
+
 /**
- * Optimal AI move using priority rules (tic-tac-toe is a solved game).
- * Priority: win → block → center → opposite corner → any corner → any side
+ * AI move with occasional blunders to keep the game winnable.
+ * Always takes a win (P1) and always blocks (P2). Strategic moves
+ * (P3-P6) are replaced by a random pick ~40% of the time.
  */
 export function getAIMove(board: Board): number {
   const empty = getEmptyCells(board);
   if (empty.length === 0) return -1;
 
-  // 1. Win: check if AI can win in one move
+  // 1. Win: check if AI can win in one move — NEVER skip
   for (const cell of empty) {
     if (wouldWin(board, cell, 'ai')) return cell;
   }
 
-  // 2. Block: check if human can win in one move
+  // 2. Block: check if human can win in one move — NEVER skip
   for (const cell of empty) {
     if (wouldWin(board, cell, 'human')) return cell;
+  }
+
+  // Blunder: skip strategic analysis and pick a random empty cell
+  if (Math.random() < BLUNDER_CHANCE) {
+    return empty[Math.floor(Math.random() * empty.length)];
   }
 
   // 3. Center

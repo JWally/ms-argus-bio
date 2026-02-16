@@ -65,7 +65,7 @@ function drawIdleText(canvas: HTMLCanvasElement): void {
   ctx.textBaseline = 'middle';
   ctx.font = `700 17px ${FONT}`;
   ctx.fillStyle = '#e2e8f0';
-  ctx.fillText('Draw the Numbers', cx, 90);
+  ctx.fillText('Draw the Characters', cx, 90);
   ctx.fillText('You See Above', cx, 116);
 
   // ── On-theme button ──

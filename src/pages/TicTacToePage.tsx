@@ -17,7 +17,6 @@ const API_URL = import.meta.env.VITE_API_URL as string | undefined;
 const CONFIDENCE_THRESHOLD = 0.6;
 const TARGET_CONFIDENCE_THRESHOLD = 0.3;
 const AI_DELAY_MS = 500;
-const AUTO_SUBMIT_MS = 2500;
 const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 
 interface TurnStrokeData {
@@ -231,12 +230,15 @@ function getCellImageData(canvas: HTMLCanvasElement, cellIndex: number): number[
   return result;
 }
 
+const MODAL_DELAY_LOSS = 1200;
+const MODAL_DELAY_WIN = 800;
+
 export default function TicTacToePage() {
   const [state, dispatch] = useReducer(reducer, undefined, initialState);
   const [verdict, setVerdict] = useState<VerdictResult | null>(null);
+  const [showModal, setShowModal] = useState(false);
   const modelRef = useRef<tf.LayersModel | null>(null);
   const canvasRef = useRef<T3CanvasHandle>(null);
-  const autoSubmitTimerRef = useRef(0);
   const rafRef = useRef(0);
   // Biometric data accumulation
   const allStrokesRef = useRef<Stroke[]>([]);
@@ -291,7 +293,7 @@ export default function TicTacToePage() {
       challenge: turnData.map((t) => LETTERS.indexOf(t.targetLetter)),
       timestamp: Date.now(),
       completionTimeMs: state.elapsedMs,
-      passed: state.winner === 'human',
+      passed: true, // all human letters were recognized — win/loss is irrelevant
       digits: turnData.map((t) => ({
         target: LETTERS.indexOf(t.targetLetter),
         recognized: LETTERS.indexOf(t.recognizedLetter),
@@ -330,14 +332,18 @@ export default function TicTacToePage() {
       });
   }, [state.elapsedMs, state.winner]);
 
-  // Trigger payload send on game-over
+  // Trigger payload send on game-over + delayed modal
   const prevPhaseRef = useRef(state.phase);
   useEffect(() => {
     if (prevPhaseRef.current !== 'game-over' && state.phase === 'game-over') {
       sendBiometricPayload();
+      const delay = state.winner === 'human' ? MODAL_DELAY_WIN : MODAL_DELAY_LOSS;
+      const timer = setTimeout(() => setShowModal(true), delay);
+      prevPhaseRef.current = state.phase;
+      return () => clearTimeout(timer);
     }
     prevPhaseRef.current = state.phase;
-  }, [state.phase, sendBiometricPayload]);
+  }, [state.phase, state.winner, sendBiometricPayload]);
 
   // ── Recognition helpers ─────────────────────────────────────────────
 
@@ -405,9 +411,8 @@ export default function TicTacToePage() {
     []
   );
 
-  /** Force submit — dispatches FAIL if recognition doesn't pass */
+  /** Submit — dispatches FAIL if recognition doesn't pass */
   const handleSubmit = useCallback(() => {
-    clearTimeout(autoSubmitTimerRef.current);
     const result = tryRecognize();
     if (result) {
       collectTurnData(result.cellIndex, state.targetLetter, result.letter, result.confidence);
@@ -419,26 +424,8 @@ export default function TicTacToePage() {
     }
   }, [tryRecognize, state.selectedCell, state.targetLetter, collectTurnData]);
 
-  /** Called on every stroke end — tries instant recognition, falls back to timer */
-  const handleStrokeEnd = useCallback(() => {
-    if (state.phase !== 'human-draw') return;
-
-    // Try instant recognition on each stroke end
-    const result = tryRecognize();
-    if (result) {
-      clearTimeout(autoSubmitTimerRef.current);
-      collectTurnData(result.cellIndex, state.targetLetter, result.letter, result.confidence);
-      const strokes = canvasRef.current?.getCellStrokes() ?? [];
-      dispatch({ type: 'RECOGNIZE_SUCCESS', ...result, strokes });
-      return;
-    }
-
-    // Not recognized yet — fallback timer for "try again" feedback
-    clearTimeout(autoSubmitTimerRef.current);
-    autoSubmitTimerRef.current = window.setTimeout(() => {
-      handleSubmit();
-    }, AUTO_SUBMIT_MS);
-  }, [state.phase, state.targetLetter, tryRecognize, handleSubmit, collectTurnData]);
+  /** No-op — user must click the DONE button to submit their letter */
+  const handleStrokeEnd = useCallback(() => {}, []);
 
   const handleCellSelect = useCallback(
     (cellIndex: number) => {
@@ -459,9 +446,11 @@ export default function TicTacToePage() {
     allStrokesRef.current = [];
     turnDataRef.current = [];
     setVerdict(null);
+    setShowModal(false);
     dispatch({ type: 'RESET' });
   }, []);
 
+  const isPlaying = state.phase !== 'idle' && state.phase !== 'loading';
   const canvasClass = state.phase === 'human-draw' ? 't3-canvas-active' : '';
 
   const timerClass =
@@ -472,7 +461,7 @@ export default function TicTacToePage() {
         : 'timer';
 
   return (
-    <div className="app">
+    <div className={`app${isPlaying ? ' t3-compact' : ''}`}>
       <header>
         <h1>
           ARGUS <span className="accent">T3</span>
@@ -481,7 +470,12 @@ export default function TicTacToePage() {
       </header>
 
       <div className="t3-page">
-        <GameStatus phase={state.phase} targetLetter={state.targetLetter} message={state.message} />
+        <GameStatus
+          phase={state.phase}
+          targetLetter={state.targetLetter}
+          message={state.message}
+          board={state.board}
+        />
 
         <div className={timerClass}>{formatTime(state.elapsedMs)}</div>
 
@@ -491,6 +485,7 @@ export default function TicTacToePage() {
             board={state.board}
             selectedCell={state.selectedCell}
             winLine={state.winLine}
+            winner={state.winner}
             phase={state.phase}
             onCellSelect={handleCellSelect}
             onStrokeEnd={handleStrokeEnd}
@@ -498,22 +493,17 @@ export default function TicTacToePage() {
         </div>
 
         <div className="t3-actions">
-          {(state.phase === 'human-draw' || state.phase === 'ai-turn') && (
-            <div
-              className={`t3-turn ${state.phase === 'ai-turn' ? 't3-turn-ai' : 't3-turn-human'}`}
+          {state.phase === 'human-draw' && (
+            <button
+              className="t3-submit-btn"
+              onClick={handleSubmit}
+              disabled={state.selectedCell === null}
             >
-              {state.phase === 'ai-turn' ? "AI'S TURN" : 'YOUR TURN'}
-            </div>
+              DONE
+            </button>
           )}
 
-          {state.phase === 'game-over' && (
-            <GameOverPanel
-              winner={state.winner}
-              elapsedMs={state.elapsedMs}
-              verdict={verdict}
-              onPlayAgain={handlePlayAgain}
-            />
-          )}
+          {state.phase === 'ai-turn' && <div className="t3-turn t3-turn-ai">AI&apos;S TURN</div>}
 
           {getEmptyCells(state.board).length < 9 && state.phase !== 'game-over' && (
             <button onClick={handlePlayAgain} className="btn btn-secondary btn-stack">
@@ -522,6 +512,19 @@ export default function TicTacToePage() {
           )}
         </div>
       </div>
+
+      {state.phase === 'game-over' && showModal && (
+        <div className="t3-modal-overlay">
+          <div className={`t3-modal${state.winner === 'human' ? ' t3-modal-celebrate' : ''}`}>
+            <GameOverPanel
+              winner={state.winner}
+              elapsedMs={state.elapsedMs}
+              verdict={verdict}
+              onPlayAgain={handlePlayAgain}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import * as tf from '@tensorflow/tfjs';
 import { loadModel, predict, getImageData28x28 } from '../ml/model';
+import { loadLetterModel, predictLetter } from '../ml/letter-model';
 import DrawingCanvas, { type CanvasHandle, type Stroke } from '../components/DrawingCanvas';
 import ResultDisplay from '../components/ResultDisplay';
 import DotChallenge from '../components/DotChallenge';
@@ -21,6 +22,68 @@ const CONFIDENCE_THRESHOLD = 0.97;
 const STABLE_CHECKS_NEEDED = 3;
 const INFERENCE_INTERVAL_MS = 250;
 const TIMEOUT_MS = 45_000;
+const CHALLENGE_LENGTH = 3;
+
+// ── Glyph set ────────────────────────────────────────────────────────
+// Removed ambiguous/low-info glyphs: 0, 1, D, I, O, Z
+
+interface Glyph {
+  char: string;
+  type: 'digit' | 'letter';
+  /** Index within the model's output array (0-9 for digits, 0-25 for letters) */
+  modelIndex: number;
+}
+
+const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+
+const GLYPH_POOL: Glyph[] = [
+  // Digits (no 0 or 1)
+  ...[2, 3, 4, 5, 6, 7, 8, 9].map((d) => ({
+    char: String(d),
+    type: 'digit' as const,
+    modelIndex: d,
+  })),
+  // Letters (no D, I, O, Z)
+  ...[
+    'A',
+    'B',
+    'C',
+    'E',
+    'F',
+    'G',
+    'H',
+    'J',
+    'K',
+    'L',
+    'M',
+    'N',
+    'P',
+    'Q',
+    'R',
+    'S',
+    'T',
+    'U',
+    'V',
+    'W',
+    'X',
+    'Y',
+  ].map((ch) => ({ char: ch, type: 'letter' as const, modelIndex: LETTERS.indexOf(ch) })),
+];
+
+function generateChallenge(): Glyph[] {
+  const glyphs: Glyph[] = [];
+  const used = new Set<string>();
+  while (glyphs.length < CHALLENGE_LENGTH) {
+    const g = GLYPH_POOL[Math.floor(Math.random() * GLYPH_POOL.length)];
+    if (!used.has(g.char)) {
+      used.add(g.char);
+      glyphs.push(g);
+    }
+  }
+  return glyphs;
+}
+
+// ── Types ────────────────────────────────────────────────────────────
 
 interface FinalResult {
   totalTimeMs: number;
@@ -37,18 +100,13 @@ function formatTime(ms: number): string {
   return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}.${String(millis).padStart(3, '0')}`;
 }
 
-function generateChallenge(): number[] {
-  const n = Math.floor(Math.random() * 900) + 100;
-  return [Math.floor(n / 100), Math.floor((n / 10) % 10), n % 10];
-}
-
 // ── CaptchaPage ─────────────────────────────────────────────────────
 
 export default function CaptchaPage() {
   const [state, setState] = useState<AppState>('loading');
   const [loadingMsg, setLoadingMsg] = useState('Initializing...');
-  const [challenge, setChallenge] = useState<number[]>([]);
-  const [currentDigitIndex, setCurrentDigitIndex] = useState(0);
+  const [challenge, setChallenge] = useState<Glyph[]>([]);
+  const [currentIndex, setCurrentIndex] = useState(0);
   const [elapsedMs, setElapsedMs] = useState(0);
   const [currentConfidence, setCurrentConfidence] = useState(0);
   const [finalResult, setFinalResult] = useState<FinalResult | null>(null);
@@ -56,16 +114,17 @@ export default function CaptchaPage() {
   const [argusToken, setArgusToken] = useState<string | null>(null);
   const [returnUrl, setReturnUrl] = useState<string | null>(null);
 
-  const modelRef = useRef<tf.LayersModel | null>(null);
+  const digitModelRef = useRef<tf.LayersModel | null>(null);
+  const letterModelRef = useRef<tf.LayersModel | null>(null);
   const canvasRef = useRef<CanvasHandle>(null);
   const timerRafRef = useRef(0);
   const inferenceRef = useRef(0);
   const stableCountRef = useRef(0);
   const activeRef = useRef(false);
   const startTimeRef = useRef(0);
-  const digitStartTimeRef = useRef(0);
-  const currentDigitIndexRef = useRef(0);
-  const challengeRef = useRef<number[]>([]);
+  const glyphStartTimeRef = useRef(0);
+  const currentIndexRef = useRef(0);
+  const challengeRef = useRef<Glyph[]>([]);
   const digitResultsRef = useRef<DigitResult[]>([]);
   const allStrokesRef = useRef<Stroke[]>([]);
   const confidenceTimelineRef = useRef<ConfidenceSnapshot[]>([]);
@@ -73,9 +132,11 @@ export default function CaptchaPage() {
     new URLSearchParams(window.location.search).get('sid')
   );
 
+  // Load both models on mount
   useEffect(() => {
-    loadModel(setLoadingMsg).then((model) => {
-      modelRef.current = model;
+    Promise.all([loadModel(setLoadingMsg), loadLetterModel()]).then(([digitModel, letterModel]) => {
+      digitModelRef.current = digitModel;
+      letterModelRef.current = letterModel;
       const c = generateChallenge();
       setChallenge(c);
       challengeRef.current = c;
@@ -86,7 +147,7 @@ export default function CaptchaPage() {
   const logPayload = useCallback((totalTimeMs: number, timedOut: boolean) => {
     const payload = {
       challengeId: crypto.randomUUID(),
-      challenge: challengeRef.current,
+      challenge: challengeRef.current.map((g) => g.modelIndex),
       timestamp: Date.now(),
       completionTimeMs: totalTimeMs,
       passed: !timedOut,
@@ -122,6 +183,38 @@ export default function CaptchaPage() {
     }
   }, []);
 
+  /** Run inference for the current glyph using the appropriate model */
+  const runInference = useCallback(
+    (
+      canvas: HTMLCanvasElement,
+      glyph: Glyph
+    ): { targetConf: number; topIndex: number; topConf: number } => {
+      if (glyph.type === 'digit' && digitModelRef.current) {
+        const { digit, confidence, allConfidences } = predict(digitModelRef.current, canvas);
+        return {
+          targetConf: allConfidences[glyph.modelIndex],
+          topIndex: digit,
+          topConf: confidence,
+        };
+      } else if (glyph.type === 'letter' && letterModelRef.current) {
+        const { confidence, allConfidences } = predictLetter(letterModelRef.current, canvas, {
+          x: 0,
+          y: 0,
+          w: canvas.width,
+          h: canvas.height,
+        });
+        const topIdx = allConfidences.indexOf(Math.max(...allConfidences));
+        return {
+          targetConf: allConfidences[glyph.modelIndex],
+          topIndex: topIdx,
+          topConf: confidence,
+        };
+      }
+      return { targetConf: 0, topIndex: -1, topConf: 0 };
+    },
+    []
+  );
+
   // Start game on first canvas touch
   const handleCanvasPointerDown = useCallback(() => {
     if (activeRef.current || state === 'loading' || state === 'complete') return;
@@ -133,7 +226,7 @@ export default function CaptchaPage() {
 
     const startTime = performance.now();
     startTimeRef.current = startTime;
-    digitStartTimeRef.current = startTime;
+    glyphStartTimeRef.current = startTime;
 
     // Timer via rAF
     const tickTimer = () => {
@@ -163,23 +256,24 @@ export default function CaptchaPage() {
     inferenceRef.current = window.setInterval(() => {
       if (!activeRef.current) return;
       const canvas = canvasRef.current?.getCanvas();
-      if (!canvas || !modelRef.current) return;
+      if (!canvas) return;
 
-      const idx = currentDigitIndexRef.current;
-      const targetDigit = challengeRef.current[idx];
-      const { digit, confidence, allConfidences } = predict(modelRef.current, canvas);
-      const targetConf = allConfidences[targetDigit];
+      const idx = currentIndexRef.current;
+      const glyph = challengeRef.current[idx];
+      if (!glyph) return;
+
+      const { targetConf, topIndex, topConf } = runInference(canvas, glyph);
       setCurrentConfidence(targetConf);
 
       confidenceTimelineRef.current.push({
         t: Math.round(performance.now() - startTime),
         digitIndex: idx,
         targetConf: Math.round(targetConf * 1000) / 1000,
-        topDigit: digit,
-        topConf: Math.round(confidence * 1000) / 1000,
+        topDigit: topIndex,
+        topConf: Math.round(topConf * 1000) / 1000,
       });
 
-      if (targetConf >= CONFIDENCE_THRESHOLD && digit === targetDigit) {
+      if (targetConf >= CONFIDENCE_THRESHOLD && topIndex === glyph.modelIndex) {
         stableCountRef.current++;
         if (stableCountRef.current >= STABLE_CHECKS_NEEDED) {
           const now = performance.now();
@@ -188,23 +282,23 @@ export default function CaptchaPage() {
 
           allStrokesRef.current.push(...strokes);
           digitResultsRef.current.push({
-            target: targetDigit,
-            recognized: digit,
+            target: glyph.modelIndex,
+            recognized: topIndex,
             confidence: targetConf,
-            timeMs: now - digitStartTimeRef.current,
+            timeMs: now - glyphStartTimeRef.current,
             strokes: normalizeStrokes(strokes, startTime),
             imageData: imgData,
           });
 
           const nextIndex = idx + 1;
           if (nextIndex >= challengeRef.current.length) {
-            // All digits done
+            // All glyphs done
             activeRef.current = false;
             cancelAnimationFrame(timerRafRef.current);
             clearInterval(inferenceRef.current);
             const totalTime = now - startTime;
             setElapsedMs(totalTime);
-            setCurrentDigitIndex(nextIndex);
+            setCurrentIndex(nextIndex);
             setFinalResult({
               totalTimeMs: totalTime,
               timedOut: false,
@@ -214,10 +308,10 @@ export default function CaptchaPage() {
             setState('complete');
             logPayload(totalTime, false);
           } else {
-            // Next digit
-            currentDigitIndexRef.current = nextIndex;
-            setCurrentDigitIndex(nextIndex);
-            digitStartTimeRef.current = now;
+            // Next glyph
+            currentIndexRef.current = nextIndex;
+            setCurrentIndex(nextIndex);
+            glyphStartTimeRef.current = now;
             stableCountRef.current = 0;
             setCurrentConfidence(0);
             canvasRef.current?.clear();
@@ -227,7 +321,7 @@ export default function CaptchaPage() {
         stableCountRef.current = 0;
       }
     }, INFERENCE_INTERVAL_MS);
-  }, [state, logPayload]);
+  }, [state, logPayload, runInference]);
 
   const handleReset = useCallback(() => {
     activeRef.current = false;
@@ -236,13 +330,13 @@ export default function CaptchaPage() {
     canvasRef.current?.clear();
     setElapsedMs(0);
     setCurrentConfidence(0);
-    setCurrentDigitIndex(0);
+    setCurrentIndex(0);
     setFinalResult(null);
     setVerdict(null);
     setArgusToken(null);
     setReturnUrl(null);
     stableCountRef.current = 0;
-    currentDigitIndexRef.current = 0;
+    currentIndexRef.current = 0;
     digitResultsRef.current = [];
     allStrokesRef.current = [];
     confidenceTimelineRef.current = [];
@@ -288,7 +382,7 @@ export default function CaptchaPage() {
               <div className={timerClass}>{formatTime(elapsedMs)}</div>
 
               <div className="challenge-digits">
-                <DotChallenge digits={challenge} currentIndex={currentDigitIndex} />
+                <DotChallenge glyphs={challenge.map((g) => g.char)} currentIndex={currentIndex} />
               </div>
             </>
           )}
@@ -338,6 +432,7 @@ export default function CaptchaPage() {
                   Continue
                 </button>
                 <StatsDrawer
+                  glyphs={challenge}
                   digits={finalResult.digits}
                   features={finalResult.features}
                   verdict={verdict}
@@ -352,10 +447,12 @@ export default function CaptchaPage() {
 }
 
 function StatsDrawer({
+  glyphs,
   digits,
   features,
   verdict,
 }: {
+  glyphs: Glyph[];
   digits: DigitResult[];
   features: ReturnType<typeof computeFeatures>;
   verdict: VerdictResult | null;
@@ -375,14 +472,13 @@ function StatsDrawer({
 
       <div className={`stats-drawer ${open ? 'stats-drawer-open' : ''}`}>
         <div className="stats-content">
-          {/* Per-digit breakdown */}
+          {/* Per-glyph breakdown */}
           <div className="stats-section">
-            <div className="stats-section-title">Per-Digit Breakdown</div>
+            <div className="stats-section-title">Per-Glyph Breakdown</div>
             <div className="stats-grid">
               {digits.map((d, i) => (
                 <div key={i} className="stats-digit-card">
-                  <div className="stats-digit-target">{d.target}</div>
-                  <StatRow label="Recognized" value={d.recognized} />
+                  <div className="stats-digit-target">{glyphs[i]?.char ?? d.target}</div>
                   <StatRow label="Confidence" value={`${(d.confidence * 100).toFixed(1)}%`} />
                   <StatRow label="Time" value={formatTime(d.timeMs)} />
                 </div>

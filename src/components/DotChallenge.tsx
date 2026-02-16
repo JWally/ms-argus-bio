@@ -1,7 +1,7 @@
 import { useRef, useEffect, useState, useMemo } from 'react';
 
 interface DotChallengeProps {
-  digits: number[];
+  glyphs: string[];
   currentIndex: number;
 }
 
@@ -24,7 +24,7 @@ function pick(arr: string[]): string {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
-export default function DotChallenge({ digits, currentIndex }: DotChallengeProps) {
+export default function DotChallenge({ glyphs, currentIndex }: DotChallengeProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < MOBILE_BP);
 
@@ -36,9 +36,9 @@ export default function DotChallenge({ digits, currentIndex }: DotChallengeProps
   }, []);
 
   // On mobile: only show the current digit. On desktop: all digits.
-  const visibleDigits = useMemo(
-    () => (isMobile ? [digits[currentIndex]] : digits),
-    [isMobile, digits, currentIndex]
+  const visibleGlyphs = useMemo(
+    () => (isMobile ? [glyphs[currentIndex]] : glyphs),
+    [isMobile, glyphs, currentIndex]
   );
   const activeSlot = isMobile ? 0 : currentIndex;
 
@@ -61,7 +61,7 @@ export default function DotChallenge({ digits, currentIndex }: DotChallengeProps
     if (!ctx) return;
     ctx.scale(dpr, dpr);
 
-    const slotW = w / visibleDigits.length;
+    const slotW = w / visibleGlyphs.length;
 
     // Build mask for all digits on an offscreen canvas
     const off = document.createElement('canvas');
@@ -74,8 +74,8 @@ export default function DotChallenge({ digits, currentIndex }: DotChallengeProps
     oc.font = `900 ${h * 0.72}px system-ui, -apple-system, sans-serif`;
     oc.textAlign = 'center';
     oc.textBaseline = 'middle';
-    for (let i = 0; i < visibleDigits.length; i++) {
-      oc.fillText(String(visibleDigits[i]), slotW * i + slotW / 2, h / 2 + 2);
+    for (let i = 0; i < visibleGlyphs.length; i++) {
+      oc.fillText(visibleGlyphs[i], slotW * i + slotW / 2, h / 2 + 2);
     }
     const mask = oc.getImageData(0, 0, w, h).data;
 
@@ -87,7 +87,7 @@ export default function DotChallenge({ digits, currentIndex }: DotChallengeProps
         const jx = x + (Math.random() - 0.5) * GAP * 0.55;
         const jy = y + (Math.random() - 0.5) * GAP * 0.55;
 
-        const slot = Math.min(visibleDigits.length - 1, Math.floor(jx / slotW));
+        const slot = Math.min(visibleGlyphs.length - 1, Math.floor(jx / slotW));
         const state = slot < activeSlot ? 'done' : slot === activeSlot ? 'current' : 'upcoming';
 
         const px = Math.max(0, Math.min(w - 1, Math.round(jx)));
@@ -124,7 +124,7 @@ export default function DotChallenge({ digits, currentIndex }: DotChallengeProps
         ctx.fill();
       }
     }
-  }, [visibleDigits, activeSlot]);
+  }, [visibleGlyphs, activeSlot]);
 
   return <canvas ref={canvasRef} className="dot-challenge-canvas" aria-hidden="true" />;
 }

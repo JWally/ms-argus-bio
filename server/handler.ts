@@ -89,7 +89,6 @@ function validatePayload(data: unknown): data is BiometricPayload {
     typeof p.completionTimeMs === 'number' &&
     typeof p.passed === 'boolean' &&
     Array.isArray(p.digits) &&
-    p.digits.length > 0 &&
     Array.isArray(p.confidenceTimeline) &&
     typeof p.inputType === 'string' &&
     typeof p.screenWidth === 'number' &&
@@ -456,7 +455,7 @@ async function handleRelabel(event: APIGatewayProxyEventV2): Promise<APIGatewayP
     if (isErrorResponse(bodyOrError)) return bodyOrError;
 
     const ids = bodyOrError.ids as string[];
-    const label = body.label as string;
+    const label = bodyOrError.label as string;
     if (!Array.isArray(ids) || ids.length === 0 || typeof label !== 'string') {
       return jsonResponse(400, { error: 'Provide ids (string[]) and label (string)' });
     }
