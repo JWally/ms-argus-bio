@@ -90,8 +90,17 @@ import { handler } from './handler';
 
 // ── Constants ───────────────────────────────────────────────────────
 
+const POST = 'POST';
+const ROUTE_CLASSIFY = '/v1/classify';
+const ROUTE_SESSION = '/v1/session';
+const ROUTE_VERIFY = '/v1/verify';
+const ROUTE_FLUSH = '/admin/flush';
+const ROUTE_STATS = '/admin/stats';
+const TEST_SECRET = 'ak_live_x';
+
 const MERCHANT_ID = 'merch-001';
 const RETURN_URL = 'https://example.com/cb';
+const INVALID_JSON_MSG = 'returns 400 for invalid JSON';
 const QDRANT_ERROR = new Error('Qdrant down');
 const DDB_ERROR = new Error('DDB timeout');
 
@@ -221,22 +230,22 @@ describe('handler routing', () => {
 });
 
 describe('POST /v1/classify', () => {
-  it('returns 400 for invalid JSON', async () => {
-    const event = makeEvent('POST', '/v1/classify');
+  it(INVALID_JSON_MSG, async () => {
+    const event = makeEvent(POST, ROUTE_CLASSIFY);
     event.body = 'not-json';
     const result = (await handler(event)) as { statusCode: number };
     expect(result.statusCode).toBe(400);
   });
 
   it('returns 400 for invalid payload structure', async () => {
-    const result = (await handler(makeEvent('POST', '/v1/classify', { bad: true }))) as {
+    const result = (await handler(makeEvent(POST, ROUTE_CLASSIFY, { bad: true }))) as {
       statusCode: number;
     };
     expect(result.statusCode).toBe(400);
   });
 
   it('returns verdict for valid payload (demo mode, no sessionId)', async () => {
-    const result = (await handler(makeEvent('POST', '/v1/classify', VALID_PAYLOAD))) as {
+    const result = (await handler(makeEvent(POST, ROUTE_CLASSIFY, VALID_PAYLOAD))) as {
       statusCode: number;
       body: string;
     };
@@ -257,7 +266,7 @@ describe('POST /v1/classify', () => {
     });
 
     const payload = { ...VALID_PAYLOAD, sessionId: 'sess-aaa' };
-    const result = (await handler(makeEvent('POST', '/v1/classify', payload))) as {
+    const result = (await handler(makeEvent(POST, ROUTE_CLASSIFY, payload))) as {
       statusCode: number;
       body: string;
     };
@@ -271,7 +280,7 @@ describe('POST /v1/classify', () => {
   it('returns 404 when sessionId references nonexistent session', async () => {
     mockGetSession.mockResolvedValue(null);
     const payload = { ...VALID_PAYLOAD, sessionId: 'sess-missing' };
-    const result = (await handler(makeEvent('POST', '/v1/classify', payload))) as {
+    const result = (await handler(makeEvent(POST, ROUTE_CLASSIFY, payload))) as {
       statusCode: number;
     };
     expect(result.statusCode).toBe(404);
@@ -285,14 +294,14 @@ describe('POST /v1/classify', () => {
       status: 'completed',
     });
     const payload = { ...VALID_PAYLOAD, sessionId: 'sess-done' };
-    const result = (await handler(makeEvent('POST', '/v1/classify', payload))) as {
+    const result = (await handler(makeEvent(POST, ROUTE_CLASSIFY, payload))) as {
       statusCode: number;
     };
     expect(result.statusCode).toBe(409);
   });
 
   it('handles base64-encoded body', async () => {
-    const event = makeEvent('POST', '/v1/classify');
+    const event = makeEvent(POST, ROUTE_CLASSIFY);
     event.body = Buffer.from(JSON.stringify(VALID_PAYLOAD)).toString('base64');
     event.isBase64Encoded = true;
     const result = (await handler(event)) as { statusCode: number };
@@ -302,7 +311,7 @@ describe('POST /v1/classify', () => {
 
 describe('POST /v1/session', () => {
   it('returns 400 for missing fields', async () => {
-    const result = (await handler(makeEvent('POST', '/v1/session', { secret: 'ak_live_x' }))) as {
+    const result = (await handler(makeEvent(POST, ROUTE_SESSION, { secret: TEST_SECRET }))) as {
       statusCode: number;
     };
     expect(result.statusCode).toBe(400);
@@ -311,7 +320,7 @@ describe('POST /v1/session', () => {
   it('returns 401 for invalid API key', async () => {
     mockLookupMerchant.mockResolvedValue(null);
     const result = (await handler(
-      makeEvent('POST', '/v1/session', {
+      makeEvent(POST, ROUTE_SESSION, {
         secret: 'ak_live_bad',
         returnUrl: RETURN_URL,
       })
@@ -323,7 +332,7 @@ describe('POST /v1/session', () => {
     mockLookupMerchant.mockResolvedValue(MERCHANT);
     mockValidateReturnUrl.mockReturnValue(false);
     const result = (await handler(
-      makeEvent('POST', '/v1/session', {
+      makeEvent(POST, ROUTE_SESSION, {
         secret: 'ak_live_good',
         returnUrl: 'https://evil.com/hack',
       })
@@ -335,7 +344,7 @@ describe('POST /v1/session', () => {
     mockLookupMerchant.mockResolvedValue(MERCHANT);
     mockValidateReturnUrl.mockReturnValue(true);
     const result = (await handler(
-      makeEvent('POST', '/v1/session', {
+      makeEvent(POST, ROUTE_SESSION, {
         secret: 'ak_live_good',
         returnUrl: RETURN_URL,
       })
@@ -347,8 +356,8 @@ describe('POST /v1/session', () => {
     expect(body.captchaUrl).toContain('sid=sess-new');
   });
 
-  it('returns 400 for invalid JSON', async () => {
-    const event = makeEvent('POST', '/v1/session');
+  it(INVALID_JSON_MSG, async () => {
+    const event = makeEvent(POST, ROUTE_SESSION);
     event.body = '{broken';
     const result = (await handler(event)) as { statusCode: number };
     expect(result.statusCode).toBe(400);
@@ -357,7 +366,7 @@ describe('POST /v1/session', () => {
 
 describe('POST /v1/verify', () => {
   it('returns 400 for missing fields', async () => {
-    const result = (await handler(makeEvent('POST', '/v1/verify', { secret: 'ak_live_x' }))) as {
+    const result = (await handler(makeEvent(POST, ROUTE_VERIFY, { secret: TEST_SECRET }))) as {
       statusCode: number;
     };
     expect(result.statusCode).toBe(400);
@@ -366,7 +375,7 @@ describe('POST /v1/verify', () => {
   it('returns 401 for invalid API key', async () => {
     mockLookupMerchant.mockResolvedValue(null);
     const result = (await handler(
-      makeEvent('POST', '/v1/verify', {
+      makeEvent(POST, ROUTE_VERIFY, {
         secret: 'ak_live_bad',
         response: 'tok-123',
       })
@@ -378,7 +387,7 @@ describe('POST /v1/verify', () => {
     mockLookupMerchant.mockResolvedValue(MERCHANT);
     mockRedeemToken.mockResolvedValue(null);
     const result = (await handler(
-      makeEvent('POST', '/v1/verify', {
+      makeEvent(POST, ROUTE_VERIFY, {
         secret: 'ak_live_good',
         response: 'tok-bad',
       })
@@ -398,7 +407,7 @@ describe('POST /v1/verify', () => {
       createdAt: 1700000000,
     });
     const result = (await handler(
-      makeEvent('POST', '/v1/verify', {
+      makeEvent(POST, ROUTE_VERIFY, {
         secret: 'ak_live_good',
         response: 'tok-123',
       })
@@ -412,8 +421,8 @@ describe('POST /v1/verify', () => {
     expect(body.timestamp).toBe(1700000000);
   });
 
-  it('returns 400 for invalid JSON', async () => {
-    const event = makeEvent('POST', '/v1/verify');
+  it(INVALID_JSON_MSG, async () => {
+    const event = makeEvent(POST, ROUTE_VERIFY);
     event.body = 'nope';
     const result = (await handler(event)) as { statusCode: number };
     expect(result.statusCode).toBe(400);
@@ -425,7 +434,7 @@ describe('POST /admin/flush', () => {
     mockCollectionExists.mockResolvedValue(true);
     mockDeleteCollection.mockImplementation(resolvedVoid);
     mockCreateCollection.mockImplementation(resolvedVoid);
-    const result = (await handler(makeEvent('POST', '/admin/flush'))) as {
+    const result = (await handler(makeEvent(POST, ROUTE_FLUSH))) as {
       statusCode: number;
       body: string;
     };
@@ -439,7 +448,7 @@ describe('POST /admin/flush', () => {
     mockDeleteCollection.mockClear();
     mockCollectionExists.mockResolvedValue(false);
     mockCreateCollection.mockImplementation(resolvedVoid);
-    const result = (await handler(makeEvent('POST', '/admin/flush'))) as {
+    const result = (await handler(makeEvent(POST, ROUTE_FLUSH))) as {
       statusCode: number;
     };
     expect(result.statusCode).toBe(200);
@@ -452,7 +461,7 @@ describe('GET /admin/stats', () => {
   it('returns collection info when it exists', async () => {
     mockCollectionExists.mockResolvedValue(true);
     mockCollectionInfo.mockResolvedValue({ points_count: 42, status: 'green' });
-    const result = (await handler(makeEvent('GET', '/admin/stats'))) as {
+    const result = (await handler(makeEvent('GET', ROUTE_STATS))) as {
       statusCode: number;
       body: string;
     };
@@ -464,7 +473,7 @@ describe('GET /admin/stats', () => {
 
   it('returns points_count 0 when collection does not exist', async () => {
     mockCollectionExists.mockResolvedValue(false);
-    const result = (await handler(makeEvent('GET', '/admin/stats'))) as {
+    const result = (await handler(makeEvent('GET', ROUTE_STATS))) as {
       statusCode: number;
       body: string;
     };
@@ -474,7 +483,7 @@ describe('GET /admin/stats', () => {
 
   it('returns 500 when stats throws', async () => {
     mockCollectionExists.mockRejectedValue(QDRANT_ERROR);
-    const result = (await handler(makeEvent('GET', '/admin/stats'))) as {
+    const result = (await handler(makeEvent('GET', ROUTE_STATS))) as {
       statusCode: number;
     };
     expect(result.statusCode).toBe(500);
@@ -484,7 +493,7 @@ describe('GET /admin/stats', () => {
 describe('error handling', () => {
   it('POST /admin/flush returns 500 on error', async () => {
     mockCollectionExists.mockRejectedValue(QDRANT_ERROR);
-    const result = (await handler(makeEvent('POST', '/admin/flush'))) as {
+    const result = (await handler(makeEvent(POST, ROUTE_FLUSH))) as {
       statusCode: number;
     };
     expect(result.statusCode).toBe(500);
@@ -493,8 +502,8 @@ describe('error handling', () => {
   it('POST /v1/session returns 500 on unexpected error', async () => {
     mockLookupMerchant.mockRejectedValue(DDB_ERROR);
     const result = (await handler(
-      makeEvent('POST', '/v1/session', {
-        secret: 'ak_live_x',
+      makeEvent(POST, ROUTE_SESSION, {
+        secret: TEST_SECRET,
         returnUrl: RETURN_URL,
       })
     )) as { statusCode: number };
@@ -504,8 +513,8 @@ describe('error handling', () => {
   it('POST /v1/verify returns 500 on unexpected error', async () => {
     mockLookupMerchant.mockRejectedValue(DDB_ERROR);
     const result = (await handler(
-      makeEvent('POST', '/v1/verify', {
-        secret: 'ak_live_x',
+      makeEvent(POST, ROUTE_VERIFY, {
+        secret: TEST_SECRET,
         response: 'tok-123',
       })
     )) as { statusCode: number };
@@ -516,7 +525,7 @@ describe('error handling', () => {
     mockEncode.mockImplementation(() => {
       throw new Error('encode boom');
     });
-    const result = (await handler(makeEvent('POST', '/v1/classify', VALID_PAYLOAD))) as {
+    const result = (await handler(makeEvent(POST, ROUTE_CLASSIFY, VALID_PAYLOAD))) as {
       statusCode: number;
     };
     expect(result.statusCode).toBe(500);

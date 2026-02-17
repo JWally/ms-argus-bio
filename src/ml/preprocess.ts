@@ -66,14 +66,12 @@ export function renderTo28x28(
   const cx = (minX + maxX) / 2;
   const cy = (minY + maxY) / 2;
 
-  // If source region is offset, copy to a temporary canvas first
+  // If source region is offset, copy to a reusable temporary canvas first
   let drawSource: HTMLCanvasElement = source;
   let drawX = cx - size / 2 + sx;
   let drawY = cy - size / 2 + sy;
   if (sx !== 0 || sy !== 0 || sw !== source.width || sh !== source.height) {
-    const tmp = document.createElement('canvas');
-    tmp.width = sw;
-    tmp.height = sh;
+    const tmp = getTmpRegion(sw, sh);
     tmp.getContext('2d')!.drawImage(source, sx, sy, sw, sh, 0, 0, sw, sh);
     drawSource = tmp;
     drawX = cx - size / 2;
@@ -85,12 +83,33 @@ export function renderTo28x28(
   return { outCanvas, empty: false };
 }
 
+/** Reusable 28×28 output canvas — cleared on each call */
+let _out28: HTMLCanvasElement | null = null;
+
 function make28x28(): HTMLCanvasElement {
-  const c = document.createElement('canvas');
-  c.width = 28;
-  c.height = 28;
-  const ctx = c.getContext('2d')!;
+  if (!_out28) {
+    _out28 = document.createElement('canvas');
+    _out28.width = 28;
+    _out28.height = 28;
+  }
+  const ctx = _out28.getContext('2d')!;
   ctx.fillStyle = 'black';
   ctx.fillRect(0, 0, 28, 28);
-  return c;
+  return _out28;
+}
+
+/** Reusable temporary canvas for region extraction */
+let _tmpRegion: HTMLCanvasElement | null = null;
+let _tmpW = 0;
+let _tmpH = 0;
+
+function getTmpRegion(w: number, h: number): HTMLCanvasElement {
+  if (!_tmpRegion || _tmpW !== w || _tmpH !== h) {
+    _tmpRegion = _tmpRegion ?? document.createElement('canvas');
+    _tmpRegion.width = w;
+    _tmpRegion.height = h;
+    _tmpW = w;
+    _tmpH = h;
+  }
+  return _tmpRegion;
 }

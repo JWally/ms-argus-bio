@@ -55,24 +55,26 @@ const FONT = 'Orbitron, system-ui, sans-serif';
 
 function drawIdleText(canvas: HTMLCanvasElement): void {
   const ctx = canvas.getContext('2d')!;
-  const cx = canvas.width / 2;
+  const w = canvas.width;
+  const h = canvas.height;
+  const cx = w / 2;
 
   ctx.fillStyle = '#000';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillRect(0, 0, w, h);
 
   // ── Instruction text ──
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.font = `700 17px ${FONT}`;
   ctx.fillStyle = '#e2e8f0';
-  ctx.fillText('Draw the Characters', cx, 90);
-  ctx.fillText('You See Above', cx, 116);
+  ctx.fillText('Draw the Characters', cx, h * 0.25);
+  ctx.fillText('You See Above', cx, h * 0.25 + 24);
 
   // ── On-theme button ──
   const btnW = 230;
-  const btnH = 54;
+  const btnH = 46;
   const btnX = cx - btnW / 2;
-  const btnY = 150;
+  const btnY = h * 0.5;
   const r = 10;
 
   // Glow shadow
@@ -229,8 +231,8 @@ const DrawingCanvas = forwardRef<CanvasHandle, Props>(({ disabled, idle }, ref) 
   return (
     <canvas
       ref={canvasRef}
-      width={280}
-      height={280}
+      width={420}
+      height={180}
       className="drawing-canvas"
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}

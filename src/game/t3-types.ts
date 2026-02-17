@@ -58,5 +58,4 @@ export type GameAction =
     }
   | { type: 'RECOGNIZE_FAIL' }
   | { type: 'AI_MOVE'; cellIndex: number; letter: string }
-  | { type: 'TICK'; now: number }
   | { type: 'RESET' };

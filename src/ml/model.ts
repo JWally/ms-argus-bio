@@ -18,8 +18,10 @@ function preprocessCanvas(canvas: HTMLCanvasElement): tf.Tensor4D {
   if (empty) return tf.zeros([1, 28, 28, 1]) as tf.Tensor4D;
 
   const outData = outCanvas.getContext('2d')!.getImageData(0, 0, 28, 28);
-  const tensor = tf.browser.fromPixels(outData, 1);
-  return tensor.toFloat().div(255.0).reshape([1, 28, 28, 1]) as tf.Tensor4D;
+  return tf.tidy(() => {
+    const tensor = tf.browser.fromPixels(outData, 1);
+    return tensor.toFloat().div(255.0).reshape([1, 28, 28, 1]) as tf.Tensor4D;
+  });
 }
 
 export function predict(

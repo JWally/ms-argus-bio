@@ -18,11 +18,9 @@ type AppState = 'loading' | 'idle' | 'active' | 'complete';
 
 const API_URL = import.meta.env.VITE_API_URL as string | undefined;
 
-const CONFIDENCE_THRESHOLD = 0.97;
-const STABLE_CHECKS_NEEDED = 3;
-const INFERENCE_INTERVAL_MS = 250;
 const TIMEOUT_MS = 45_000;
-const CHALLENGE_LENGTH = 3;
+const CHALLENGE_MIN = 3;
+const CHALLENGE_MAX = 4;
 
 // ── Glyph set ────────────────────────────────────────────────────────
 // Removed ambiguous/low-info glyphs: 0, 1, D, I, O, Z
@@ -71,16 +69,25 @@ const GLYPH_POOL: Glyph[] = [
 ];
 
 function generateChallenge(): Glyph[] {
-  const glyphs: Glyph[] = [];
+  const len = CHALLENGE_MIN + Math.floor(Math.random() * (CHALLENGE_MAX - CHALLENGE_MIN + 1));
+  // Pick (len-1) unique glyphs, duplicate one → len total
+  const unique: Glyph[] = [];
   const used = new Set<string>();
-  while (glyphs.length < CHALLENGE_LENGTH) {
+  while (unique.length < len - 1) {
     const g = GLYPH_POOL[Math.floor(Math.random() * GLYPH_POOL.length)];
     if (!used.has(g.char)) {
       used.add(g.char);
-      glyphs.push(g);
+      unique.push(g);
     }
   }
-  return glyphs;
+  const repeatIdx = Math.floor(Math.random() * unique.length);
+  const all = [...unique, unique[repeatIdx]];
+  // Fisher-Yates shuffle
+  for (let i = all.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [all[i], all[j]] = [all[j], all[i]];
+  }
+  return all;
 }
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -108,7 +115,8 @@ export default function CaptchaPage() {
   const [challenge, setChallenge] = useState<Glyph[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [elapsedMs, setElapsedMs] = useState(0);
-  const [currentConfidence, setCurrentConfidence] = useState(0);
+  const [flashKey, setFlashKey] = useState(0);
+  const [flashColor, setFlashColor] = useState<'green' | 'red'>('green');
   const [finalResult, setFinalResult] = useState<FinalResult | null>(null);
   const [verdict, setVerdict] = useState<VerdictResult | null>(null);
   const [argusToken, setArgusToken] = useState<string | null>(null);
@@ -118,8 +126,6 @@ export default function CaptchaPage() {
   const letterModelRef = useRef<tf.LayersModel | null>(null);
   const canvasRef = useRef<CanvasHandle>(null);
   const timerRafRef = useRef(0);
-  const inferenceRef = useRef(0);
-  const stableCountRef = useRef(0);
   const activeRef = useRef(false);
   const startTimeRef = useRef(0);
   const glyphStartTimeRef = useRef(0);
@@ -161,26 +167,45 @@ export default function CaptchaPage() {
       features: computeFeatures(allStrokesRef.current),
       ...(sessionIdRef.current ? { sessionId: sessionIdRef.current } : {}),
     };
+    // eslint-disable-next-line no-console
     console.log('[ARGUS BIO] Biometric Payload', payload);
 
-    if (API_URL) {
-      fetch(`${API_URL}/v1/classify`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
-        .then((res) => res.json())
-        .then((v) => {
-          console.log('[ARGUS BIO] Verdict', v);
-          const result = v as VerdictResult;
-          setVerdict(result);
-          if (result.token) setArgusToken(result.token);
-          if (result.returnUrl) setReturnUrl(result.returnUrl);
-        })
-        .catch((err) => {
-          console.error('[ARGUS BIO] Classification error', err);
-        });
+    const fallbackVerdict: VerdictResult = {
+      verdict: 'uncertain',
+      confidence: 0,
+      neighborCount: 0,
+      heuristicLabel: 'no-api',
+    };
+
+    if (!API_URL) {
+      setVerdict(fallbackVerdict);
+      return;
     }
+
+    const ctrl = new AbortController();
+    const timeout = setTimeout(() => ctrl.abort(), 10_000);
+
+    fetch(`${API_URL}/v1/classify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: ctrl.signal,
+    })
+      .then((res) => res.json())
+      .then((v) => {
+        // eslint-disable-next-line no-console
+        console.log('[ARGUS BIO] Verdict', v);
+        const result = v as VerdictResult;
+        setVerdict(result);
+        if (result.token) setArgusToken(result.token);
+        if (result.returnUrl) setReturnUrl(result.returnUrl);
+      })
+      .catch((err) => {
+        // eslint-disable-next-line no-console
+        console.error('[ARGUS BIO] Classification error', err);
+        setVerdict(fallbackVerdict);
+      })
+      .finally(() => clearTimeout(timeout));
   }, []);
 
   /** Run inference for the current glyph using the appropriate model */
@@ -236,7 +261,6 @@ export default function CaptchaPage() {
 
       if (elapsed >= TIMEOUT_MS) {
         activeRef.current = false;
-        clearInterval(inferenceRef.current);
         const totalTime = TIMEOUT_MS;
         setFinalResult({
           totalTimeMs: totalTime,
@@ -251,91 +275,95 @@ export default function CaptchaPage() {
       timerRafRef.current = requestAnimationFrame(tickTimer);
     };
     timerRafRef.current = requestAnimationFrame(tickTimer);
+  }, [state, logPayload]);
 
-    // Continuous inference
-    inferenceRef.current = window.setInterval(() => {
-      if (!activeRef.current) return;
-      const canvas = canvasRef.current?.getCanvas();
-      if (!canvas) return;
-
-      const idx = currentIndexRef.current;
-      const glyph = challengeRef.current[idx];
-      if (!glyph) return;
-
-      const { targetConf, topIndex, topConf } = runInference(canvas, glyph);
-      setCurrentConfidence(targetConf);
-
-      confidenceTimelineRef.current.push({
-        t: Math.round(performance.now() - startTime),
-        digitIndex: idx,
-        targetConf: Math.round(targetConf * 1000) / 1000,
-        topDigit: topIndex,
-        topConf: Math.round(topConf * 1000) / 1000,
-      });
-
-      if (targetConf >= CONFIDENCE_THRESHOLD && topIndex === glyph.modelIndex) {
-        stableCountRef.current++;
-        if (stableCountRef.current >= STABLE_CHECKS_NEEDED) {
-          const now = performance.now();
-          const strokes = canvasRef.current?.getStrokes() ?? [];
-          const imgData = getImageData28x28(canvas);
-
-          allStrokesRef.current.push(...strokes);
-          digitResultsRef.current.push({
-            target: glyph.modelIndex,
-            recognized: topIndex,
-            confidence: targetConf,
-            timeMs: now - glyphStartTimeRef.current,
-            strokes: normalizeStrokes(strokes, startTime),
-            imageData: imgData,
-          });
-
-          const nextIndex = idx + 1;
-          if (nextIndex >= challengeRef.current.length) {
-            // All glyphs done
-            activeRef.current = false;
-            cancelAnimationFrame(timerRafRef.current);
-            clearInterval(inferenceRef.current);
-            const totalTime = now - startTime;
-            setElapsedMs(totalTime);
-            setCurrentIndex(nextIndex);
-            setFinalResult({
-              totalTimeMs: totalTime,
-              timedOut: false,
-              digits: [...digitResultsRef.current],
-              features: computeFeatures(allStrokesRef.current),
-            });
-            setState('complete');
-            logPayload(totalTime, false);
-          } else {
-            // Next glyph
-            currentIndexRef.current = nextIndex;
-            setCurrentIndex(nextIndex);
-            glyphStartTimeRef.current = now;
-            stableCountRef.current = 0;
-            setCurrentConfidence(0);
-            canvasRef.current?.clear();
-          }
-        }
+  const advance = useCallback(
+    (now: number) => {
+      const nextIndex = currentIndexRef.current + 1;
+      if (nextIndex >= challengeRef.current.length) {
+        activeRef.current = false;
+        cancelAnimationFrame(timerRafRef.current);
+        const totalTime = now - startTimeRef.current;
+        setElapsedMs(totalTime);
+        setCurrentIndex(nextIndex);
+        setFinalResult({
+          totalTimeMs: totalTime,
+          timedOut: false,
+          digits: [...digitResultsRef.current],
+          features: computeFeatures(allStrokesRef.current),
+        });
+        setState('complete');
+        logPayload(totalTime, false);
       } else {
-        stableCountRef.current = 0;
+        currentIndexRef.current = nextIndex;
+        setCurrentIndex(nextIndex);
+        glyphStartTimeRef.current = now;
+        canvasRef.current?.clear();
       }
-    }, INFERENCE_INTERVAL_MS);
-  }, [state, logPayload, runInference]);
+    },
+    [logPayload]
+  );
+
+  const handleNext = useCallback(() => {
+    if (!activeRef.current) return;
+    const canvas = canvasRef.current?.getCanvas();
+    if (!canvas) return;
+
+    const idx = currentIndexRef.current;
+    const glyph = challengeRef.current[idx];
+    if (!glyph) return;
+
+    const { targetConf, topIndex, topConf } = runInference(canvas, glyph);
+    const now = performance.now();
+    const strokes = canvasRef.current?.getStrokes() ?? [];
+    const imgData = getImageData28x28(canvas);
+
+    confidenceTimelineRef.current.push({
+      t: Math.round(now - startTimeRef.current),
+      digitIndex: idx,
+      targetConf: Math.round(targetConf * 1000) / 1000,
+      topDigit: topIndex,
+      topConf: Math.round(topConf * 1000) / 1000,
+    });
+
+    allStrokesRef.current.push(...strokes);
+    digitResultsRef.current.push({
+      target: glyph.modelIndex,
+      recognized: topIndex,
+      confidence: targetConf,
+      timeMs: now - glyphStartTimeRef.current,
+      strokes: normalizeStrokes(strokes, startTimeRef.current),
+      imageData: imgData,
+    });
+
+    if (topIndex === glyph.modelIndex) {
+      // Correct — green flash, advance
+      setFlashColor('green');
+      setFlashKey((k) => k + 1);
+      advance(now);
+    } else {
+      // Wrong — red flash, stay on same glyph, clear canvas
+      setFlashColor('red');
+      setFlashKey((k) => k + 1);
+      glyphStartTimeRef.current = now;
+      canvasRef.current?.clear();
+    }
+  }, [runInference, advance]);
+
+  const handleErase = useCallback(() => {
+    canvasRef.current?.clear();
+  }, []);
 
   const handleReset = useCallback(() => {
     activeRef.current = false;
     cancelAnimationFrame(timerRafRef.current);
-    clearInterval(inferenceRef.current);
     canvasRef.current?.clear();
     setElapsedMs(0);
-    setCurrentConfidence(0);
     setCurrentIndex(0);
     setFinalResult(null);
     setVerdict(null);
     setArgusToken(null);
     setReturnUrl(null);
-    stableCountRef.current = 0;
     currentIndexRef.current = 0;
     digitResultsRef.current = [];
     allStrokesRef.current = [];
@@ -345,8 +373,6 @@ export default function CaptchaPage() {
     challengeRef.current = c;
     setState('idle');
   }, []);
-
-  const confLevel = currentConfidence >= 0.9 ? 'high' : currentConfidence >= 0.5 ? 'mid' : 'low';
 
   const timerClass = [
     'timer',
@@ -361,6 +387,7 @@ export default function CaptchaPage() {
 
   return (
     <div className="app">
+      {flashKey > 0 && <div key={flashKey} className={`flash-overlay flash-${flashColor}`} />}
       <header>
         <h1>
           ARGUS <span className="accent">BIO</span>
@@ -390,25 +417,27 @@ export default function CaptchaPage() {
           {state !== 'complete' && (
             <div className={`canvas-area ${canvasState}`} onPointerDown={handleCanvasPointerDown}>
               <DrawingCanvas ref={canvasRef} idle={state === 'idle'} />
-
-              <div className="confidence-track">
-                <div
-                  className="confidence-fill"
-                  data-level={state === 'active' ? confLevel : 'idle'}
-                  style={{
-                    width: `${Math.round(currentConfidence * 100)}%`,
-                  }}
-                />
-                <div className="confidence-threshold" />
-              </div>
             </div>
           )}
 
           <div className="action-stack">
-            {state === 'active' && (
-              <button onClick={handleReset} className="btn btn-secondary btn-stack">
-                Reset
-              </button>
+            {(state === 'idle' || state === 'active') && (
+              <>
+                <button
+                  onClick={handleNext}
+                  className="btn btn-next btn-stack"
+                  disabled={state === 'idle'}
+                >
+                  Next
+                </button>
+                <button
+                  onClick={handleErase}
+                  className="btn btn-erase btn-stack"
+                  disabled={state === 'idle'}
+                >
+                  Erase
+                </button>
+              </>
             )}
             {state === 'complete' && finalResult && (
               <>

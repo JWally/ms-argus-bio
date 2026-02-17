@@ -18,6 +18,7 @@ const CONFIDENCE_THRESHOLD = 0.6;
 const TARGET_CONFIDENCE_THRESHOLD = 0.3;
 const AI_DELAY_MS = 500;
 const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+const PHASE_HUMAN_DRAW = 'human-draw';
 
 interface TurnStrokeData {
   cellIndex: number;
@@ -59,7 +60,7 @@ function reducer(state: GameState, action: GameAction): GameState {
     case 'START_GAME':
       return {
         ...initialState(),
-        phase: 'human-draw',
+        phase: PHASE_HUMAN_DRAW,
         targetLetter: randomLetter(),
         selectedCell: null,
       };
@@ -68,17 +69,11 @@ function reducer(state: GameState, action: GameAction): GameState {
       if (state.board[action.cellIndex]) return state;
       return {
         ...state,
-        phase: 'human-draw',
+        phase: PHASE_HUMAN_DRAW,
         selectedCell: action.cellIndex,
         message: '',
         // Start clock on first cell touch
         turnStartMs: state.turnStartMs ?? performance.now(),
-      };
-
-    case 'TICK':
-      return {
-        ...state,
-        elapsedMs: state.humanTimeMs + (state.turnStartMs ? action.now - state.turnStartMs : 0),
       };
 
     case 'RECOGNIZE_SUCCESS': {
@@ -191,7 +186,7 @@ function reducer(state: GameState, action: GameAction): GameState {
       return {
         ...state,
         board: newBoard,
-        phase: 'human-draw',
+        phase: PHASE_HUMAN_DRAW,
         selectedCell: null,
         currentPlayer: 'human',
         targetLetter: randomLetter(),
@@ -205,7 +200,7 @@ function reducer(state: GameState, action: GameAction): GameState {
     case 'RESET':
       return {
         ...initialState(),
-        phase: 'human-draw',
+        phase: PHASE_HUMAN_DRAW,
         targetLetter: randomLetter(),
         selectedCell: null,
       };
@@ -240,6 +235,7 @@ export default function TicTacToePage() {
   const modelRef = useRef<tf.LayersModel | null>(null);
   const canvasRef = useRef<T3CanvasHandle>(null);
   const rafRef = useRef(0);
+  const timerRef = useRef<HTMLDivElement>(null);
   // Biometric data accumulation
   const allStrokesRef = useRef<Stroke[]>([]);
   const turnDataRef = useRef<TurnStrokeData[]>([]);
@@ -253,17 +249,20 @@ export default function TicTacToePage() {
     });
   }, []);
 
-  // Speed-chess timer: rAF only during human turns
+  // Speed-chess timer: rAF only during human turns — writes to DOM directly
   useEffect(() => {
     if (state.turnStartMs === null) return;
 
+    const base = state.humanTimeMs;
+    const start = state.turnStartMs;
     const tick = () => {
-      dispatch({ type: 'TICK', now: performance.now() });
+      const elapsed = base + (performance.now() - start);
+      if (timerRef.current) timerRef.current.textContent = formatTime(elapsed);
       rafRef.current = requestAnimationFrame(tick);
     };
     rafRef.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafRef.current);
-  }, [state.turnStartMs]);
+  }, [state.turnStartMs, state.humanTimeMs]);
 
   // AI turn: delayed move
   useEffect(() => {
@@ -330,7 +329,7 @@ export default function TicTacToePage() {
         // eslint-disable-next-line no-console
         console.error('[ARGUS T3] Classification error', err);
       });
-  }, [state.elapsedMs, state.winner]);
+  }, [state.elapsedMs]);
 
   // Trigger payload send on game-over + delayed modal
   const prevPhaseRef = useRef(state.phase);
@@ -353,7 +352,7 @@ export default function TicTacToePage() {
     letter: string;
     confidence: number;
   } | null => {
-    if (state.phase !== 'human-draw' || state.selectedCell === null || !modelRef.current)
+    if (state.phase !== PHASE_HUMAN_DRAW || state.selectedCell === null || !modelRef.current)
       return null;
 
     const canvas = canvasRef.current?.getCanvas();
@@ -434,7 +433,7 @@ export default function TicTacToePage() {
         dispatch({ type: 'START_GAME' });
         return;
       }
-      if (state.phase === 'human-draw' && cellIndex >= 0) {
+      if (state.phase === PHASE_HUMAN_DRAW && cellIndex >= 0) {
         dispatch({ type: 'SELECT_CELL', cellIndex });
       }
     },
@@ -451,7 +450,7 @@ export default function TicTacToePage() {
   }, []);
 
   const isPlaying = state.phase !== 'idle' && state.phase !== 'loading';
-  const canvasClass = state.phase === 'human-draw' ? 't3-canvas-active' : '';
+  const canvasClass = state.phase === PHASE_HUMAN_DRAW ? 't3-canvas-active' : '';
 
   const timerClass =
     state.turnStartMs !== null
@@ -477,7 +476,9 @@ export default function TicTacToePage() {
           board={state.board}
         />
 
-        <div className={timerClass}>{formatTime(state.elapsedMs)}</div>
+        <div ref={timerRef} className={timerClass}>
+          {formatTime(state.elapsedMs)}
+        </div>
 
         <div className={canvasClass}>
           <TicTacToeCanvas
@@ -493,7 +494,7 @@ export default function TicTacToePage() {
         </div>
 
         <div className="t3-actions">
-          {state.phase === 'human-draw' && (
+          {state.phase === PHASE_HUMAN_DRAW && (
             <button
               className="t3-submit-btn"
               onClick={handleSubmit}
