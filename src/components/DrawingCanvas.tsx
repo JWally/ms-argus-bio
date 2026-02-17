@@ -26,102 +26,9 @@ export interface CanvasHandle {
 
 interface Props {
   disabled?: boolean;
-  idle?: boolean;
 }
 
-interface RoundRectOpts {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  r: number;
-}
-
-function roundRect(ctx: CanvasRenderingContext2D, { x, y, w, h, r }: RoundRectOpts): void {
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.lineTo(x + w - r, y);
-  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-  ctx.lineTo(x + w, y + h - r);
-  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-  ctx.lineTo(x + r, y + h);
-  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-  ctx.lineTo(x, y + r);
-  ctx.quadraticCurveTo(x, y, x + r, y);
-  ctx.closePath();
-}
-
-const FONT = 'Orbitron, system-ui, sans-serif';
-
-function drawIdleText(canvas: HTMLCanvasElement): void {
-  const ctx = canvas.getContext('2d')!;
-  const w = canvas.width;
-  const h = canvas.height;
-  const cx = w / 2;
-
-  ctx.fillStyle = '#000';
-  ctx.fillRect(0, 0, w, h);
-
-  // ── Instruction text ──
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.font = `700 17px ${FONT}`;
-  ctx.fillStyle = '#e2e8f0';
-  ctx.fillText('Draw the Characters', cx, h * 0.35);
-  ctx.fillText('You See Above', cx, h * 0.35 + 24);
-
-  // ── On-theme button ──
-  const btnW = 230;
-  const btnH = 46;
-  const btnX = cx - btnW / 2;
-  const btnY = h * 0.52;
-  const r = 10;
-
-  // Glow shadow
-  ctx.shadowColor = 'rgba(99, 102, 241, 0.4)';
-  ctx.shadowBlur = 16;
-  ctx.shadowOffsetX = 0;
-  ctx.shadowOffsetY = 0;
-
-  // Shadow underneath
-  roundRect(ctx, { x: btnX + 1, y: btnY + 3, w: btnW, h: btnH, r });
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-  ctx.fill();
-
-  // Reset shadow for crisp layers
-  ctx.shadowColor = 'transparent';
-  ctx.shadowBlur = 0;
-
-  // Bottom bevel (dark edge)
-  roundRect(ctx, { x: btnX, y: btnY + 3, w: btnW, h: btnH - 1, r });
-  ctx.fillStyle = '#3730a3';
-  ctx.fill();
-
-  // Main button face
-  roundRect(ctx, { x: btnX, y: btnY, w: btnW, h: btnH - 4, r });
-  ctx.fillStyle = '#6366f1';
-  ctx.fill();
-
-  // Top highlight
-  roundRect(ctx, { x: btnX + 3, y: btnY + 2, w: btnW - 6, h: btnH / 2 - 4, r: r - 1 });
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
-  ctx.fill();
-
-  // Outline
-  roundRect(ctx, { x: btnX, y: btnY, w: btnW, h: btnH - 1, r });
-  ctx.strokeStyle = '#4338ca';
-  ctx.lineWidth = 2;
-  ctx.stroke();
-
-  // Button text
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.font = `900 13px ${FONT}`;
-  ctx.fillStyle = '#fff';
-  ctx.fillText('CLICK HERE TO START', cx, btnY + (btnH - 4) / 2);
-}
-
-const DrawingCanvas = forwardRef<CanvasHandle, Props>(({ disabled, idle }, ref) => {
+const DrawingCanvas = forwardRef<CanvasHandle, Props>(({ disabled }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const strokesRef = useRef<Stroke[]>([]);
   const currentStrokeRef = useRef<Stroke | null>(null);
@@ -142,17 +49,29 @@ const DrawingCanvas = forwardRef<CanvasHandle, Props>(({ disabled, idle }, ref) 
     },
   }));
 
+  // Sync canvas buffer to CSS size so aspect ratio is never distorted
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    if (idle) {
-      drawIdleText(canvas);
-    } else {
+
+    const sync = () => {
+      const rect = canvas.getBoundingClientRect();
+      const w = Math.round(rect.width);
+      const h = Math.round(rect.height);
+      if (canvas.width !== w || canvas.height !== h) {
+        canvas.width = w;
+        canvas.height = h;
+      }
       const ctx = canvas.getContext('2d')!;
       ctx.fillStyle = '#000';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-    }
-  }, [idle]);
+      ctx.fillRect(0, 0, w, h);
+    };
+
+    sync();
+    const ro = new ResizeObserver(sync);
+    ro.observe(canvas);
+    return () => ro.disconnect();
+  }, []);
 
   const getPos = useCallback((e: React.PointerEvent) => {
     const canvas = canvasRef.current!;
@@ -231,8 +150,6 @@ const DrawingCanvas = forwardRef<CanvasHandle, Props>(({ disabled, idle }, ref) 
   return (
     <canvas
       ref={canvasRef}
-      width={400}
-      height={400}
       className="drawing-canvas"
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}

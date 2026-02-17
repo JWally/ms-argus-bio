@@ -414,7 +414,13 @@ export default function CaptchaPage() {
 
           {state !== 'complete' && (
             <div className={`canvas-area ${canvasState}`} onPointerDown={handleCanvasPointerDown}>
-              <DrawingCanvas ref={canvasRef} idle={state === 'idle'} />
+              <DrawingCanvas ref={canvasRef} />
+              {state === 'idle' && (
+                <div className="canvas-overlay">
+                  <p className="canvas-overlay-text">Draw the Characters You See Above</p>
+                  <p className="canvas-overlay-start">-- CLICK HERE TO START --</p>
+                </div>
+              )}
             </div>
           )}
 
