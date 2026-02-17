@@ -88,7 +88,7 @@ function buildRows(
   if (prTimeMs !== null && prTimeMs < board[board.length - 1].timeMs) {
     const prIsCurrent = currentTimeMs !== null && Math.abs(prTimeMs - currentTimeMs) < 1;
     if (!prIsCurrent) {
-      rows.push({ label: 'PR', timeMs: prTimeMs, kind: 'pr' });
+      rows.push({ label: `${currentLabel} - PR*`, timeMs: prTimeMs, kind: 'pr' });
     }
   }
 

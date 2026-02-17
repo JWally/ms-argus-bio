@@ -12,21 +12,89 @@ import {
 const MOBILE_BP = 768;
 const MAX_OFF_BOARD_RANK = 50;
 
-// North Korean IP ranges (175.45.176.0/22)
-function randomNKIP(): string {
-  const b3 = 176 + Math.floor(Math.random() * 4);
-  const b4 = Math.floor(Math.random() * 256);
-  return `175.45.${b3}.${b4}`;
-}
+const ARCADE_INITIALS = [
+  // Classic arcade
+  'AAA',
+  'ACE',
+  'ARC',
+  'ASH',
+  'BAD',
+  'BAM',
+  'BEN',
+  'BOB',
+  'BUZ',
+  'CAM',
+  'CAT',
+  'CPU',
+  'DAD',
+  'DAN',
+  'DOC',
+  'EVE',
+  'FOX',
+  'GUS',
+  'HAL',
+  'HEX',
+  'ICE',
+  'JAM',
+  'JAX',
+  'JET',
+  'JOE',
+  'KAI',
+  'KAT',
+  'LEX',
+  'MAX',
+  'MEL',
+  'MOM',
+  'NEO',
+  'NPC',
+  'PAT',
+  'PEW',
+  'RAD',
+  'RAM',
+  'REX',
+  'RYU',
+  'SAM',
+  'SKY',
+  'TAZ',
+  'TOM',
+  'VEX',
+  'WAX',
+  'XAN',
+  'YAK',
+  'ZAP',
+  'ZED',
+  'ZOE',
+  // Famous initials
+  'JFK',
+  'RFK',
+  'MLK',
+  'FDR',
+  'LBJ',
+  'RBG',
+  'MJK',
+  'MJF',
+  'DMX',
+  'JRR',
+  'GRR',
+  'ODB',
+  'MCA',
+  'RZA',
+  'GZA',
+  'JLO',
+  'BJK',
+  'EMF',
+  'TLC',
+  'DMC',
+];
 
 const BIO_CONFIG: BoardConfig = {
-  storageKey: 'argus-bio-leaderboard',
+  storageKey: 'argus-bio-leaderboard-v2',
   prKey: 'argus-bio-pr',
   boardSize: 10,
   mobileBoardSize: 5,
   minTimeMs: 2750,
   maxCapMs: 7000,
-  generateLabel: () => randomNKIP(),
+  generateLabel: () => ARCADE_INITIALS[Math.floor(Math.random() * ARCADE_INITIALS.length)],
 };
 
 function estimateRank(
