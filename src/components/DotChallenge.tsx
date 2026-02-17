@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, useMemo } from 'react';
+import { useRef, useEffect, useMemo } from 'react';
 
 interface DotChallengeProps {
   glyphs: string[];
@@ -18,8 +18,7 @@ const BG_SPOTLIGHT = ['#32325a', '#383868', '#2e2e54', '#363660', '#3a3a62'];
 const DOT_R = 3;
 const GAP = 6;
 const H = 180;
-const MOBILE_BP = 768;
-const NUM_FRAMES = 3;
+const NUM_FRAMES = 5;
 const JITTER_PX = 1.5;
 
 function pick(arr: string[]): string {
@@ -121,20 +120,9 @@ function computeDots({ glyphs, activeSlot, mask, w, h, slotW }: ComputeDotsOpts)
 export default function DotChallenge({ glyphs, currentIndex }: DotChallengeProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef(0);
-  const [isMobile, setIsMobile] = useState(() => window.innerWidth < MOBILE_BP);
 
-  useEffect(() => {
-    const mql = window.matchMedia(`(max-width: ${MOBILE_BP - 1}px)`);
-    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
-    mql.addEventListener('change', handler);
-    return () => mql.removeEventListener('change', handler);
-  }, []);
-
-  const visibleGlyphs = useMemo(
-    () => (isMobile ? [glyphs[currentIndex]] : glyphs),
-    [isMobile, glyphs, currentIndex]
-  );
-  const activeSlot = isMobile ? 0 : currentIndex;
+  const visibleGlyphs = useMemo(() => [glyphs[currentIndex]], [glyphs, currentIndex]);
+  const activeSlot = 0;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -157,16 +145,14 @@ export default function DotChallenge({ glyphs, currentIndex }: DotChallengeProps
     const mask = buildMask(visibleGlyphs, w, h, slotW);
     const dots = computeDots({ glyphs: visibleGlyphs, activeSlot, mask, w, h, slotW });
 
-    // Animation loop — cycles frame groups so only 1/3 of digit dots
-    // show their real color per frame. Screenshots capture a single frame
-    // = unreadable. Human eye integrates all 3 at 60fps = clear.
+    // Temporal multiplexing: only 1/5 of digit dots show per frame.
+    // Human eye integrates all 5 at 60fps = clear. Screenshot = 20% signal.
     let frameIndex = 0;
 
     const draw = () => {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, w, h);
 
-      // Batch by color to minimize fillStyle switches
       const batches = new Map<string, number[]>();
 
       for (let i = 0; i < dots.length; i++) {
@@ -174,7 +160,6 @@ export default function DotChallenge({ glyphs, currentIndex }: DotChallengeProps
         const jx = dot.x + (Math.random() - 0.5) * JITTER_PX;
         const jy = dot.y + (Math.random() - 0.5) * JITTER_PX;
 
-        // Digit dots only visible on their assigned frame
         const color = dot.isDigit && dot.frameGroup !== frameIndex ? dot.bgColor : dot.realColor;
 
         let batch = batches.get(color);
@@ -188,8 +173,8 @@ export default function DotChallenge({ glyphs, currentIndex }: DotChallengeProps
 
       for (const [color, rects] of batches) {
         ctx.fillStyle = color;
-        for (let i = 0; i < rects.length; i += 4) {
-          ctx.fillRect(rects[i], rects[i + 1], rects[i + 2], rects[i + 3]);
+        for (let j = 0; j < rects.length; j += 4) {
+          ctx.fillRect(rects[j], rects[j + 1], rects[j + 2], rects[j + 3]);
         }
       }
 

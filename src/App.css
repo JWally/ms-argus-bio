@@ -104,7 +104,7 @@ header h1 {
   border-radius: 12px;
   touch-action: none;
   width: var(--canvas-size);
-  height: 180px;
+  height: var(--canvas-size);
   transition:
     opacity 0.3s,
     border-color 0.3s;
@@ -221,7 +221,7 @@ header h1 {
 
 @media (min-width: 768px) {
   .action-stack {
-    width: 480px;
+    width: var(--canvas-size);
   }
 }
 
@@ -547,10 +547,18 @@ header h1 {
 .stats-grid {
   display: flex;
   gap: 0.5rem;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.stats-grid::-webkit-scrollbar {
+  display: none;
 }
 
 .stats-digit-card {
-  flex: 1;
+  flex: 1 0 3.5rem;
+  min-width: 3.5rem;
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -565,11 +573,17 @@ header h1 {
   margin-bottom: 0.375rem;
 }
 
-.stats-digit-row {
-  display: flex;
-  justify-content: space-between;
-  font-size: 0.7rem;
-  padding: 0.125rem 0;
+.stats-digit-label {
+  font-size: 0.6rem;
+  color: var(--text-muted);
+  margin-top: 0.25rem;
+}
+
+.stats-digit-value {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text);
 }
 
 /* Stats table rows */
@@ -612,5 +626,12 @@ main {
   flex-direction: column;
   align-items: center;
   width: 100%;
-  --canvas-size: min(calc(100vw - 1rem), 420px);
+  --canvas-size: min(calc(100vw - 1rem), 600px);
+}
+
+/* Mobile: hide header/timer on completion so results sit at top */
+@media (max-width: 767px) {
+  .app-complete header {
+    display: none;
+  }
 }

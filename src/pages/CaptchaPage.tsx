@@ -261,15 +261,13 @@ export default function CaptchaPage() {
 
       if (elapsed >= TIMEOUT_MS) {
         activeRef.current = false;
-        const totalTime = TIMEOUT_MS;
         setFinalResult({
-          totalTimeMs: totalTime,
+          totalTimeMs: TIMEOUT_MS,
           timedOut: true,
           digits: [...digitResultsRef.current],
           features: computeFeatures(allStrokesRef.current),
         });
         setState('complete');
-        logPayload(totalTime, true);
         return;
       }
       timerRafRef.current = requestAnimationFrame(tickTimer);
@@ -386,7 +384,7 @@ export default function CaptchaPage() {
   const canvasState = state === 'idle' ? 'canvas-idle' : state === 'active' ? 'canvas-active' : '';
 
   return (
-    <div className="app">
+    <div className={`app ${state === 'complete' ? 'app-complete' : ''}`}>
       {flashKey > 0 && <div key={flashKey} className={`flash-overlay flash-${flashColor}`} />}
       <header>
         <h1>
@@ -508,8 +506,10 @@ function StatsDrawer({
               {digits.map((d, i) => (
                 <div key={i} className="stats-digit-card">
                   <div className="stats-digit-target">{glyphs[i]?.char ?? d.target}</div>
-                  <StatRow label="Confidence" value={`${(d.confidence * 100).toFixed(1)}%`} />
-                  <StatRow label="Time" value={formatTime(d.timeMs)} />
+                  <div className="stats-digit-label">Confidence</div>
+                  <div className="stats-digit-value">{(d.confidence * 100).toFixed(1)}%</div>
+                  <div className="stats-digit-label">Time</div>
+                  <div className="stats-digit-value">{(d.timeMs / 1000).toFixed(2)}s</div>
                 </div>
               ))}
             </div>
