@@ -273,7 +273,7 @@ export default function CaptchaPage() {
       timerRafRef.current = requestAnimationFrame(tickTimer);
     };
     timerRafRef.current = requestAnimationFrame(tickTimer);
-  }, [state, logPayload]);
+  }, [state]);
 
   const advance = useCallback(
     (now: number) => {
