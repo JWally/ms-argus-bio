@@ -34,7 +34,6 @@ export default function GameStatus({ phase, mask, maskWidth, maskHeight, message
 
       {isPlaying && (
         <div className={`t3-status-letter${dimmed ? ' t3-status-dimmed' : ''}`}>
-          <span className="t3-status-label">{dimmed ? 'AI thinking...' : 'Draw'}</span>
           <DotChallenge
             masks={[noisyMask]}
             maskWidth={maskWidth}
@@ -45,7 +44,7 @@ export default function GameStatus({ phase, mask, maskWidth, maskHeight, message
       )}
 
       {isPlaying && boardEmpty && !dimmed && (
-        <div className="t3-status-nudge">Tap a cell, draw the letter, then hit DONE</div>
+        <div className="t3-status-nudge">Tap a cell, draw the letter, then hit NEXT</div>
       )}
 
       {message && <div className="t3-status-message">{message}</div>}

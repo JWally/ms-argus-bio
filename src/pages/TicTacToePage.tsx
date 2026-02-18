@@ -635,7 +635,7 @@ export default function TicTacToePage() {
               disabled={state.phase !== PHASE_HUMAN_DRAW || state.selectedCell === null}
               style={{ visibility: state.phase === 'ai-turn' ? 'hidden' : 'visible' }}
             >
-              DONE
+              NEXT
             </button>
           )}
 
