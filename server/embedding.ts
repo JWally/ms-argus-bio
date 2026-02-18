@@ -1,10 +1,10 @@
 // server/embedding.ts
-// BiometricPayload → 66d vector encoding
+// BiometricPayload → 70d vector encoding
 
 import type { BiometricPayload, NormalizedStroke } from './types';
 import { timingCV } from './heuristics';
 
-const EMBEDDING_DIMS = 66;
+const EMBEDDING_DIMS = 70;
 
 /** Clamp value to [0, 1] after min-max normalization */
 function norm(value: number, min: number, max: number): number {
@@ -98,7 +98,7 @@ function digitShapeFeatures(strokes: NormalizedStroke[]): number[] {
 }
 
 /**
- * Encode a BiometricPayload into a 66-dimensional feature vector.
+ * Encode a BiometricPayload into a 70-dimensional feature vector.
  * All features are min-max normalized to [0, 1].
  */
 // eslint-disable-next-line complexity, sonarjs/cognitive-complexity
@@ -328,6 +328,30 @@ export function encode(payload: BiometricPayload): number[] {
   // Clamped to [0, 3] for normalization — higher = more irregular = more human.
   vec.push(norm(timingCV(payload), 0, 3));
 
+  // ── Dim 66: Coalesced event ratio (1d) ──
+  // Fraction of pointer move events that have coalesced events > 0.
+  // Real browsers coalesce 2-6 events per frame → ratio ~0.5-0.9.
+  // Automation frameworks always produce 0 → ratio = 0.
+  vec.push(norm(f.coalescedRatio ?? 0, 0, 1));
+
+  // ── Dim 67: rAF cadence ratio (1d) ──
+  // Fraction of inter-point deltas near multiples of 16.67ms (60fps).
+  // Real pointer events cluster on frame boundaries → ratio > 0.5.
+  // CDP-injected events arrive at arbitrary times → ratio ~0.3.
+  vec.push(norm(f.rafCadenceRatio ?? 0, 0, 1));
+
+  // ── Dim 68: Velocity bell score (1d) ──
+  // How closely stroke velocity profiles match the minimum-jerk bell curve.
+  // Human strokes follow slow-fast-slow pattern → score ~0.5-0.8.
+  // Bot strokes with uniform speed → lower scores.
+  vec.push(norm(f.velocityBellScore ?? 0, 0, 1));
+
+  // ── Dim 69: Inter-stroke pause CV (1d) ──
+  // Coefficient of variation of gaps between strokes.
+  // Humans have bimodal pauses (within-char short, between-char long) → CV > 0.3.
+  // Bots from single distribution → CV < 0.2.
+  vec.push(norm(f.interStrokePauseCV ?? 0, 0, 3));
+
   // Sanity check
   if (vec.length !== EMBEDDING_DIMS) {
     throw new Error(`Embedding dimension mismatch: expected ${EMBEDDING_DIMS}, got ${vec.length}`);
@@ -336,5 +360,5 @@ export function encode(payload: BiometricPayload): number[] {
   return vec;
 }
 
-export const EMBEDDING_VERSION = 'v3';
+export const EMBEDDING_VERSION = 'v5';
 export { EMBEDDING_DIMS };

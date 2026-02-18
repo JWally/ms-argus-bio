@@ -32,7 +32,8 @@ export interface GameState {
   phase: GamePhase;
   board: Board;
   currentPlayer: Player;
-  targetLetter: string;
+  /** Index into the server-provided masks array for the current human turn */
+  currentMaskIndex: number;
   selectedCell: number | null;
   winLine: WinLine | null;
   winner: Player | 'draw' | null;

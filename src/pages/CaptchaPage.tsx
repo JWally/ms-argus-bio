@@ -8,10 +8,12 @@ import DotChallenge from '../components/DotChallenge';
 import {
   computeFeatures,
   normalizeStrokes,
+  detectTampering,
   type DigitResult,
   type ConfidenceSnapshot,
   type VerdictResult,
 } from '../utils/biometrics';
+import { buildClientMask, CLIENT_MASK_WIDTH, CLIENT_MASK_HEIGHT } from '../utils/mask';
 import '../App.css';
 
 type AppState = 'loading' | 'idle' | 'active' | 'complete';
@@ -19,59 +21,41 @@ type AppState = 'loading' | 'idle' | 'active' | 'complete';
 const API_URL = import.meta.env.VITE_API_URL as string | undefined;
 
 const TIMEOUT_MS = 45_000;
-const CHALLENGE_MIN = 3;
-const CHALLENGE_MAX = 4;
 
-// ── Glyph set ────────────────────────────────────────────────────────
-// Removed ambiguous/low-info glyphs: 0, 1, D, I, O, Z
-
+// ── Glyph type ──────────────────────────────────────────────────────
+// The client no longer knows the character or modelIndex.
+// It only knows the type (digit/letter) for model selection, and a mask for display.
 interface Glyph {
+  type: 'digit' | 'letter';
+  /** Base64-encoded 1-bit packed mask from the server */
+  mask: string;
+}
+
+// ── Fallback for local dev without API ──────────────────────────────
+const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+
+interface FallbackGlyph {
   char: string;
   type: 'digit' | 'letter';
-  /** Index within the model's output array (0-9 for digits, 0-25 for letters) */
   modelIndex: number;
 }
 
-const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-
-const GLYPH_POOL: Glyph[] = [
-  // Digits (no 0 or 1)
-  ...[2, 3, 4, 5, 6, 7, 8, 9].map((d) => ({
+const GLYPH_POOL: FallbackGlyph[] = [
+  ...[2, 3, 4, 7].map((d) => ({
     char: String(d),
     type: 'digit' as const,
     modelIndex: d,
   })),
-  // Letters (no D, I, O, Z)
-  ...[
-    'A',
-    'B',
-    'C',
-    'E',
-    'F',
-    'G',
-    'H',
-    'J',
-    'K',
-    'L',
-    'M',
-    'N',
-    'P',
-    'Q',
-    'R',
-    'S',
-    'T',
-    'U',
-    'V',
-    'W',
-    'X',
-    'Y',
-  ].map((ch) => ({ char: ch, type: 'letter' as const, modelIndex: LETTERS.indexOf(ch) })),
+  ...['A', 'C', 'E', 'F', 'H', 'J', 'K', 'M', 'N', 'P', 'R', 'T', 'W', 'X', 'Y'].map((ch) => ({
+    char: ch,
+    type: 'letter' as const,
+    modelIndex: LETTERS.indexOf(ch),
+  })),
 ];
 
-function generateChallenge(): Glyph[] {
-  const len = CHALLENGE_MIN + Math.floor(Math.random() * (CHALLENGE_MAX - CHALLENGE_MIN + 1));
-  // Pick (len-1) unique glyphs, duplicate one → len total
-  const unique: Glyph[] = [];
+function generateFallbackChallenge(): Glyph[] {
+  const len = 3 + Math.floor(Math.random() * 2); // 3 or 4
+  const unique: FallbackGlyph[] = [];
   const used = new Set<string>();
   while (unique.length < len - 1) {
     const g = GLYPH_POOL[Math.floor(Math.random() * GLYPH_POOL.length)];
@@ -82,12 +66,14 @@ function generateChallenge(): Glyph[] {
   }
   const repeatIdx = Math.floor(Math.random() * unique.length);
   const all = [...unique, unique[repeatIdx]];
-  // Fisher-Yates shuffle
   for (let i = all.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [all[i], all[j]] = [all[j], all[i]];
   }
-  return all;
+  return all.map((g) => ({
+    type: g.type,
+    mask: buildClientMask(g.char),
+  }));
 }
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -121,6 +107,7 @@ export default function CaptchaPage() {
   const [verdict, setVerdict] = useState<VerdictResult | null>(null);
   const [argusToken, setArgusToken] = useState<string | null>(null);
   const [returnUrl, setReturnUrl] = useState<string | null>(null);
+  const [retryMsg, setRetryMsg] = useState<string | null>(null);
 
   const digitModelRef = useRef<tf.LayersModel | null>(null);
   const letterModelRef = useRef<tf.LayersModel | null>(null);
@@ -137,23 +124,48 @@ export default function CaptchaPage() {
   const sessionIdRef = useRef<string | null>(
     new URLSearchParams(window.location.search).get('sid')
   );
+  const challengeIdRef = useRef<string>('');
+  const [maskDims, setMaskDims] = useState({ w: CLIENT_MASK_WIDTH, h: CLIENT_MASK_HEIGHT });
 
-  // Load both models on mount
+  /** Fetch a challenge from the server, or fall back to client-side generation */
+  const fetchChallenge = useCallback(async (): Promise<Glyph[]> => {
+    if (!API_URL) return generateFallbackChallenge();
+    try {
+      const res = await fetch(`${API_URL}/v1/challenge`);
+      const data = await res.json();
+      challengeIdRef.current = data.challengeId;
+      setMaskDims({ w: data.maskWidth, h: data.maskHeight });
+      const masks = data.masks as string[];
+      const types = data.types as ('digit' | 'letter')[];
+      return masks.map((mask, i) => ({ type: types[i], mask }));
+    } catch {
+      return generateFallbackChallenge();
+    }
+  }, []);
+
+  // Load both models + fetch server challenge on mount
   useEffect(() => {
-    Promise.all([loadModel(setLoadingMsg), loadLetterModel()]).then(([digitModel, letterModel]) => {
+    const loadAll = async () => {
+      const [digitModel, letterModel, c] = await Promise.all([
+        loadModel(setLoadingMsg),
+        loadLetterModel(),
+        fetchChallenge(),
+      ]);
       digitModelRef.current = digitModel;
       letterModelRef.current = letterModel;
-      const c = generateChallenge();
+
       setChallenge(c);
       challengeRef.current = c;
       setState('idle');
-    });
-  }, []);
+    };
+    loadAll();
+  }, [fetchChallenge]);
 
   const logPayload = useCallback((totalTimeMs: number, timedOut: boolean) => {
     const payload = {
-      challengeId: crypto.randomUUID(),
-      challenge: challengeRef.current.map((g) => g.modelIndex),
+      challengeId: challengeIdRef.current || crypto.randomUUID(),
+      // Don't leak expected answers — just send glyph types
+      challenge: challengeRef.current.map((g) => (g.type === 'digit' ? 0 : 1)),
       timestamp: Date.now(),
       completionTimeMs: totalTimeMs,
       passed: !timedOut,
@@ -165,6 +177,7 @@ export default function CaptchaPage() {
       devicePixelRatio: window.devicePixelRatio,
       userAgent: navigator.userAgent,
       features: computeFeatures(allStrokesRef.current),
+      tamperedApis: detectTampering(),
       ...(sessionIdRef.current ? { sessionId: sessionIdRef.current } : {}),
     };
     // eslint-disable-next-line no-console
@@ -195,6 +208,10 @@ export default function CaptchaPage() {
       .then((v) => {
         // eslint-disable-next-line no-console
         console.log('[ARGUS BIO] Verdict', v);
+        if (v.retry) {
+          setRetryMsg(v.message || 'Incorrect. Try again!');
+          return;
+        }
         const result = v as VerdictResult;
         setVerdict(result);
         if (result.token) setArgusToken(result.token);
@@ -208,20 +225,17 @@ export default function CaptchaPage() {
       .finally(() => clearTimeout(timeout));
   }, []);
 
-  /** Run inference for the current glyph using the appropriate model */
+  /** Run inference for the current glyph using the appropriate model.
+   *  Client no longer knows the expected answer — only checks recognizability. */
   const runInference = useCallback(
     (
       canvas: HTMLCanvasElement,
-      glyph: Glyph
-    ): { targetConf: number; topIndex: number; topConf: number } => {
-      if (glyph.type === 'digit' && digitModelRef.current) {
-        const { digit, confidence, allConfidences } = predict(digitModelRef.current, canvas);
-        return {
-          targetConf: allConfidences[glyph.modelIndex],
-          topIndex: digit,
-          topConf: confidence,
-        };
-      } else if (glyph.type === 'letter' && letterModelRef.current) {
+      glyphType: 'digit' | 'letter'
+    ): { topIndex: number; topConf: number } => {
+      if (glyphType === 'digit' && digitModelRef.current) {
+        const { digit, confidence } = predict(digitModelRef.current, canvas);
+        return { topIndex: digit, topConf: confidence };
+      } else if (glyphType === 'letter' && letterModelRef.current) {
         const { confidence, allConfidences } = predictLetter(letterModelRef.current, canvas, {
           x: 0,
           y: 0,
@@ -229,13 +243,9 @@ export default function CaptchaPage() {
           h: canvas.height,
         });
         const topIdx = allConfidences.indexOf(Math.max(...allConfidences));
-        return {
-          targetConf: allConfidences[glyph.modelIndex],
-          topIndex: topIdx,
-          topConf: confidence,
-        };
+        return { topIndex: topIdx, topConf: confidence };
       }
-      return { targetConf: 0, topIndex: -1, topConf: 0 };
+      return { topIndex: -1, topConf: 0 };
     },
     []
   );
@@ -311,7 +321,7 @@ export default function CaptchaPage() {
     const glyph = challengeRef.current[idx];
     if (!glyph) return;
 
-    const { targetConf, topIndex, topConf } = runInference(canvas, glyph);
+    const { topIndex, topConf } = runInference(canvas, glyph.type);
     const now = performance.now();
     const strokes = canvasRef.current?.getStrokes() ?? [];
     const imgData = getImageData28x28(canvas);
@@ -319,28 +329,30 @@ export default function CaptchaPage() {
     confidenceTimelineRef.current.push({
       t: Math.round(now - startTimeRef.current),
       digitIndex: idx,
-      targetConf: Math.round(targetConf * 1000) / 1000,
+      targetConf: 0, // Client no longer knows the target
       topDigit: topIndex,
       topConf: Math.round(topConf * 1000) / 1000,
     });
 
     allStrokesRef.current.push(...strokes);
     digitResultsRef.current.push({
-      target: glyph.modelIndex,
+      target: -1, // Hidden — server decrypts from challengeId
       recognized: topIndex,
-      confidence: targetConf,
+      confidence: topConf,
       timeMs: now - glyphStartTimeRef.current,
       strokes: normalizeStrokes(strokes, startTimeRef.current),
       imageData: imgData,
     });
 
-    if (topIndex === glyph.modelIndex) {
-      // Correct — green flash, advance
-      setFlashColor('green');
-      setFlashKey((k) => k + 1);
+    // Client only checks: "is this a recognizable character?"
+    // NOT "is this the RIGHT character?" — server validates that.
+    // This prevents bots from using green/red feedback to retry per glyph.
+    const RECOGNITION_THRESHOLD = 0.15;
+    if (topConf > RECOGNITION_THRESHOLD) {
+      // Recognizable character — advance (server will validate correctness)
       advance(now);
     } else {
-      // Wrong — red flash, stay on same glyph, clear canvas
+      // Unrecognizable scribble — retry with red flash
       setFlashColor('red');
       setFlashKey((k) => k + 1);
       glyphStartTimeRef.current = now;
@@ -352,7 +364,7 @@ export default function CaptchaPage() {
     canvasRef.current?.clear();
   }, []);
 
-  const handleReset = useCallback(() => {
+  const handleReset = useCallback(async () => {
     activeRef.current = false;
     cancelAnimationFrame(timerRafRef.current);
     canvasRef.current?.clear();
@@ -362,15 +374,24 @@ export default function CaptchaPage() {
     setVerdict(null);
     setArgusToken(null);
     setReturnUrl(null);
+    setRetryMsg(null);
     currentIndexRef.current = 0;
     digitResultsRef.current = [];
     allStrokesRef.current = [];
     confidenceTimelineRef.current = [];
-    const c = generateChallenge();
+
+    const c = await fetchChallenge();
     setChallenge(c);
     challengeRef.current = c;
     setState('idle');
-  }, []);
+  }, [fetchChallenge]);
+
+  // Auto-reset after a retry (challenge mismatch)
+  useEffect(() => {
+    if (!retryMsg) return;
+    const id = setTimeout(() => handleReset(), 2500);
+    return () => clearTimeout(id);
+  }, [retryMsg, handleReset]);
 
   const timerClass = [
     'timer',
@@ -407,7 +428,12 @@ export default function CaptchaPage() {
               <div className={timerClass}>{formatTime(elapsedMs)}</div>
 
               <div className="challenge-digits">
-                <DotChallenge glyphs={challenge.map((g) => g.char)} currentIndex={currentIndex} />
+                <DotChallenge
+                  masks={challenge.map((g) => g.mask)}
+                  maskWidth={maskDims.w}
+                  maskHeight={maskDims.h}
+                  currentIndex={currentIndex}
+                />
               </div>
             </>
           )}
@@ -443,7 +469,14 @@ export default function CaptchaPage() {
                 </button>
               </>
             )}
-            {state === 'complete' && finalResult && (
+            {state === 'complete' && retryMsg && (
+              <div className="retry-panel">
+                <div className="retry-icon">&#x21bb;</div>
+                <p className="retry-message">{retryMsg}</p>
+                <p className="retry-sub">Resetting automatically&hellip;</p>
+              </div>
+            )}
+            {state === 'complete' && finalResult && !retryMsg && (
               <>
                 <ResultDisplay
                   totalTimeMs={finalResult.totalTimeMs}
@@ -511,7 +544,9 @@ function StatsDrawer({
             <div className="stats-grid">
               {digits.map((d, i) => (
                 <div key={i} className="stats-digit-card">
-                  <div className="stats-digit-target">{glyphs[i]?.char ?? d.target}</div>
+                  <div className="stats-digit-target">
+                    #{i + 1} ({glyphs[i]?.type ?? '?'})
+                  </div>
                   <div className="stats-digit-label">Confidence</div>
                   <div className="stats-digit-value">{(d.confidence * 100).toFixed(1)}%</div>
                   <div className="stats-digit-label">Time</div>

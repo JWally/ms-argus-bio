@@ -48,50 +48,88 @@ export function timingCV(payload: BiometricPayload): number {
   return stddev / avg;
 }
 
+export interface HeuristicResult {
+  label: Label;
+  /** Which bot signal triggered, or 'human'/'uncertain' reason */
+  reason: string;
+}
+
 /**
  * Apply heuristic rules to auto-label a biometric payload.
- *
- * Bot signals (any one → bot):
- * - completionTimeMs < 500 (impossibly fast for 3 digits)
- * - eventFrequencyHz > 300 (synthetic event injection)
- * - speedVariance === 0 with totalPoints > 20 (perfectly uniform movement)
- * - >20% of consecutive point pairs have dt < 1ms (dispatchEvent batching)
- * - timingCV < 0.3 with totalPoints > 20 (metronomic timing from automation)
- *
- * Human signals (all must hold → human):
- * - passed === true (recognized all digits)
- * - speedVariance > 0 (some natural variation)
- * - 1000 < completionTimeMs < 45000
- * - strokeCount >= 3 (at least one stroke per digit)
- * - totalPoints > 10 (enough data to be real drawing)
- * - eventFrequencyHz between 10-200Hz (sanity min; Firefox/Linux can be ~15-30Hz)
+ * Returns both the label and the reason for debugging.
  */
-function isBotSignal(payload: BiometricPayload): boolean {
+// eslint-disable-next-line complexity, sonarjs/cognitive-complexity
+function getBotReason(payload: BiometricPayload): string | null {
   const f = payload.features;
-  if (payload.completionTimeMs < 500) return true;
-  if (f.eventFrequencyHz > 300) return true;
-  if (f.speedVariance === 0 && f.totalPoints > 20) return true;
-  // Synthetic event batching or metronomic timing (enough points to be reliable)
-  if (f.totalPoints > 20 && (zeroDtRatio(payload) > 0.2 || timingCV(payload) < 0.3)) return true;
-  return false;
+
+  // ── Prototype tampering (instant kill) ──
+  if (payload.tamperedApis && payload.tamperedApis.length > 0)
+    return `tampered:${payload.tamperedApis.join(',')}`;
+
+  // ── Hard bot signals (any one triggers) ──
+  if (payload.completionTimeMs < 500) return `fast:${payload.completionTimeMs}ms`;
+  if (f.eventFrequencyHz > 300) return `freq:${f.eventFrequencyHz.toFixed(1)}Hz`;
+  if (f.speedVariance === 0 && f.totalPoints > 20) return 'zero-speed-variance';
+  if (f.totalPoints > 20 && zeroDtRatio(payload) > 0.2)
+    return `zeroDt:${(zeroDtRatio(payload) * 100).toFixed(1)}%`;
+
+  // ── Coalesced / pressure signals ──
+  // Only check when the client explicitly confirms the browser supports
+  // getCoalescedEvents (Safari/iOS don't — they report 0 for both).
+  // Using === true so missing/undefined field (old client JS) is also skipped.
+  if (f.coalescedSupported === true && f.coalescedRatio === 0 && f.totalPoints > 20)
+    return 'no-coalesced';
+  // Touch/pen with zero pressure variance = synthetic events, BUT only
+  // when the browser actually reports non-zero pressure. iOS Safari reports
+  // pressure: 0 for ALL touch events (even though it now supports
+  // getCoalescedEvents since Safari 16+). Gate on avgPressure > 0 so we
+  // only flag uniform pressure when the browser IS reporting it.
+  if (
+    (payload.inputType === 'touch' || payload.inputType === 'pen') &&
+    f.avgPressure > 0 &&
+    f.pressureVariance === 0 &&
+    f.totalPoints > 20
+  )
+    return 'zero-pressure-touch';
+
+  // ── rAF cadence analysis ──
+  if (f.rafCadenceRatio < 0.35 && f.totalPoints > 20) return `raf:${f.rafCadenceRatio.toFixed(3)}`;
+
+  // ── Inter-stroke pause uniformity ──
+  if (f.interStrokePauseCV < 0.15 && f.strokeCount > 4)
+    return `pauseCV:${f.interStrokePauseCV.toFixed(3)}`;
+
+  return null;
 }
 
-function isHumanSignal(payload: BiometricPayload): boolean {
+function getHumanReason(payload: BiometricPayload): string | null {
   const f = payload.features;
-  return (
-    payload.passed === true &&
-    f.speedVariance > 0 &&
-    payload.completionTimeMs > 1000 &&
-    payload.completionTimeMs < 45000 &&
-    f.strokeCount >= 3 &&
-    f.totalPoints > 10 &&
-    f.eventFrequencyHz >= 10 &&
-    f.eventFrequencyHz <= 200
-  );
+  if (payload.passed !== true) return null;
+  if (f.speedVariance <= 0) return null;
+  if (payload.completionTimeMs <= 1000 || payload.completionTimeMs >= 45000) return null;
+  if (f.strokeCount < 3) return null;
+  if (f.totalPoints <= 10) return null;
+  if (f.eventFrequencyHz < 10 || f.eventFrequencyHz > 200) return null;
+  return 'all-human-signals';
 }
 
-export function heuristicLabel(payload: BiometricPayload): Label {
-  if (isBotSignal(payload)) return 'bot';
-  if (isHumanSignal(payload)) return 'human';
-  return 'uncertain';
+export function heuristicLabel(payload: BiometricPayload): HeuristicResult {
+  const botReason = getBotReason(payload);
+  if (botReason) return { label: 'bot', reason: botReason };
+
+  const humanReason = getHumanReason(payload);
+  if (humanReason) return { label: 'human', reason: humanReason };
+
+  // Build reason for uncertain
+  const f = payload.features;
+  const missing: string[] = [];
+  if (!payload.passed) missing.push('not-passed');
+  if (f.speedVariance <= 0) missing.push('no-speed-var');
+  if (payload.completionTimeMs <= 1000) missing.push('too-fast');
+  if (payload.completionTimeMs >= 45000) missing.push('too-slow');
+  if (f.strokeCount < 3) missing.push(`strokes:${f.strokeCount}`);
+  if (f.totalPoints <= 10) missing.push(`points:${f.totalPoints}`);
+  if (f.eventFrequencyHz < 10) missing.push(`freq-low:${f.eventFrequencyHz.toFixed(1)}`);
+  if (f.eventFrequencyHz > 200) missing.push(`freq-high:${f.eventFrequencyHz.toFixed(1)}`);
+  return { label: 'uncertain', reason: missing.join(',') || 'unknown' };
 }

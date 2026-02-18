@@ -200,6 +200,12 @@ export class BioStack extends Stack {
     );
 
     httpApi.addRoutes({
+      path: '/v1/challenge',
+      methods: [apigatewayv2.HttpMethod.GET],
+      integration: lambdaIntegration,
+    });
+
+    httpApi.addRoutes({
       path: '/v1/session',
       methods: [apigatewayv2.HttpMethod.POST],
       integration: lambdaIntegration,

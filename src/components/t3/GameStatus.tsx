@@ -1,15 +1,27 @@
+import { useMemo } from 'react';
+import DotChallenge from '../DotChallenge';
+import { noisifyMask } from '../../utils/mask';
 import type { Board, GamePhase } from '../../game/t3-types';
 
 interface Props {
   phase: GamePhase;
-  targetLetter: string;
+  /** Base64-encoded 1-bit packed mask from the server (or client fallback) */
+  mask: string;
+  maskWidth: number;
+  maskHeight: number;
   message: string;
   board: Board;
 }
 
-export default function GameStatus({ phase, targetLetter, message, board }: Props) {
-  const showLetter = phase === 'human-draw' || phase === 'human-recognize';
+export default function GameStatus({ phase, mask, maskWidth, maskHeight, message, board }: Props) {
+  const isPlaying = phase === 'human-draw' || phase === 'human-recognize' || phase === 'ai-turn';
   const boardEmpty = board.every((c) => c === null);
+  const dimmed = phase === 'ai-turn';
+
+  const noisyMask = useMemo(
+    () => (isPlaying && mask ? noisifyMask(mask, maskWidth, maskHeight) : ''),
+    [mask, maskWidth, maskHeight, isPlaying]
+  );
 
   return (
     <div className="t3-status">
@@ -20,19 +32,20 @@ export default function GameStatus({ phase, targetLetter, message, board }: Prop
         </div>
       )}
 
-      {showLetter && (
-        <div className="t3-status-letter">
-          <span className="t3-status-label">Draw</span>
-          <span className="t3-target-letter">{targetLetter}</span>
+      {isPlaying && (
+        <div className={`t3-status-letter${dimmed ? ' t3-status-dimmed' : ''}`}>
+          <span className="t3-status-label">{dimmed ? 'AI thinking...' : 'Draw'}</span>
+          <DotChallenge
+            masks={[noisyMask]}
+            maskWidth={maskWidth}
+            maskHeight={maskHeight}
+            currentIndex={0}
+          />
         </div>
       )}
 
-      {showLetter && boardEmpty && (
+      {isPlaying && boardEmpty && !dimmed && (
         <div className="t3-status-nudge">Tap a cell, draw the letter, then hit DONE</div>
-      )}
-
-      {phase === 'ai-turn' && (
-        <div className="t3-status-text t3-status-thinking">AI thinking...</div>
       )}
 
       {message && <div className="t3-status-message">{message}</div>}

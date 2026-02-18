@@ -58,7 +58,7 @@ export default function GameOverPanel({ winner, elapsedMs, verdict, onPlayAgain 
 
 function VerdictBadge({ verdict }: { verdict: VerdictResult | null }) {
   if (verdict) {
-    const cfg = VERDICT_CONFIG[verdict.verdict];
+    const cfg = VERDICT_CONFIG[verdict.verdict] ?? VERDICT_CONFIG.uncertain;
     return (
       <div className="verdict-section">
         <div className={`verdict-badge ${cfg.className}`}>{cfg.label}</div>

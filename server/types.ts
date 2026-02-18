@@ -15,6 +15,8 @@ export interface BiometricPayload {
   devicePixelRatio: number;
   userAgent: string;
   features: AggregateFeatures;
+  /** APIs detected as tampered on the client (prototype lies) */
+  tamperedApis?: string[];
 }
 
 export interface DigitResult {
@@ -24,6 +26,8 @@ export interface DigitResult {
   timeMs: number;
   strokes: NormalizedStroke[];
   imageData: number[];
+  /** Full 26-element softmax distribution (letters A-Z). Used by T3 for confidence-based validation. */
+  allConfidences?: number[];
 }
 
 export interface NormalizedStroke {
@@ -36,6 +40,7 @@ export interface NormalizedStroke {
     tiltY: number;
     width: number;
     height: number;
+    coalescedCount: number;
   }[];
   startTime: number;
   endTime: number;
@@ -63,6 +68,12 @@ export interface AggregateFeatures {
   avgTimeBetweenStrokes: number;
   eventFrequencyHz: number;
   avgJerk: number;
+  coalescedRatio: number;
+  rafCadenceRatio: number;
+  velocityBellScore: number;
+  interStrokePauseCV: number;
+  /** Whether the browser natively supports getCoalescedEvents (Safari doesn't) */
+  coalescedSupported?: boolean;
 }
 
 export type Label = 'human' | 'bot' | 'uncertain';

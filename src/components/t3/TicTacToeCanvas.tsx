@@ -98,12 +98,7 @@ function renderGrid(ctx: CanvasRenderingContext2D): void {
   }
 }
 
-function renderPlacedMarks(
-  ctx: CanvasRenderingContext2D,
-  board: Board,
-  morphTimes: Map<number, number>
-): void {
-  const now = performance.now();
+function renderPlacedMarks(ctx: CanvasRenderingContext2D, board: Board): void {
   for (let i = 0; i < 9; i++) {
     const cell = board[i];
     if (!cell) continue;
@@ -111,37 +106,26 @@ function renderPlacedMarks(
     const center = cellCenter(i);
 
     if (cell.owner === 'human') {
-      const morphStart = morphTimes.get(i);
-      const progress = morphStart ? Math.min(1, (now - morphStart) / MORPH_MS) : 1;
-
-      // During morph: draw fading handwritten strokes
-      if (progress < 1 && cell.strokes.length > 0) {
-        ctx.save();
-        ctx.beginPath();
-        ctx.rect(origin.x, origin.y, CELL_SIZE, CELL_SIZE);
-        ctx.clip();
-        ctx.globalAlpha = 1 - progress;
-        ctx.strokeStyle = '#fff';
-        ctx.lineWidth = STROKE_LINE_WIDTH;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        drawStrokePaths(ctx, cell.strokes);
-        ctx.restore();
-      }
-
-      // Draw clean rendered letter (fades in during morph)
+      // Show the user's actual handwritten strokes — green
       ctx.save();
-      ctx.globalAlpha = progress;
-      ctx.font = `900 ${CELL_SIZE * 0.55}px ${FONT}`;
-      ctx.fillStyle = '#fff';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(cell.letter, center.x, center.y + 4);
+      ctx.beginPath();
+      ctx.rect(origin.x, origin.y, CELL_SIZE, CELL_SIZE);
+      ctx.clip();
+      ctx.strokeStyle = '#22c55e';
+      ctx.lineWidth = STROKE_LINE_WIDTH;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.shadowColor = 'rgba(34, 197, 94, 0.3)';
+      ctx.shadowBlur = 6;
+      drawStrokePaths(ctx, cell.strokes);
       ctx.restore();
     } else {
+      // AI letters — red
       ctx.save();
-      ctx.font = `900 ${CELL_SIZE * 0.55}px ${FONT}`;
-      ctx.fillStyle = cssVar('--accent', '#6366f1');
+      ctx.font = `900 ${CELL_SIZE * 0.65}px ${FONT}`;
+      ctx.fillStyle = '#ef4444';
+      ctx.shadowColor = 'rgba(239, 68, 68, 0.4)';
+      ctx.shadowBlur = 8;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(cell.letter, center.x, center.y + 4);
@@ -174,7 +158,7 @@ function renderLiveStrokes(
   ctx.beginPath();
   ctx.rect(origin.x, origin.y, CELL_SIZE, CELL_SIZE);
   ctx.clip();
-  ctx.strokeStyle = '#fff';
+  ctx.strokeStyle = '#22c55e';
   ctx.lineWidth = STROKE_LINE_WIDTH;
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
@@ -382,7 +366,7 @@ const TicTacToeCanvas = forwardRef<T3CanvasHandle, Props>(
       const activeCell = selectedCell ?? pendingCellRef.current;
 
       renderGrid(ctx);
-      renderPlacedMarks(ctx, board, morphTimesRef.current);
+      renderPlacedMarks(ctx, board);
 
       if (activeCell !== null && isDrawPhase) {
         renderActiveCell(ctx, activeCell);
@@ -518,6 +502,7 @@ const TicTacToeCanvas = forwardRef<T3CanvasHandle, Props>(
           tiltY: e.tiltY,
           width: e.width,
           height: e.height,
+          coalescedCount: 0,
         };
 
         // Cancel any active dissolve — user is drawing again
@@ -576,6 +561,7 @@ const TicTacToeCanvas = forwardRef<T3CanvasHandle, Props>(
         }
 
         currentStrokeRef.current.push({ x: pos.x, y: pos.y });
+        const coalesced = (e.nativeEvent as PointerEvent).getCoalescedEvents?.() ?? [];
         currentRichStrokeRef.current?.push({
           x: pos.x,
           y: pos.y,
@@ -585,6 +571,7 @@ const TicTacToeCanvas = forwardRef<T3CanvasHandle, Props>(
           tiltY: e.tiltY,
           width: e.width,
           height: e.height,
+          coalescedCount: coalesced.length,
         });
         render();
       },

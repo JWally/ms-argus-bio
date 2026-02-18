@@ -18,7 +18,7 @@
 }
 
 .t3-compact .t3-status {
-  min-height: 2.5rem;
+  min-height: auto;
 }
 
 /* Canvas */
@@ -67,7 +67,6 @@
 /* Status bar */
 .t3-status {
   text-align: center;
-  min-height: 4rem;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -94,8 +93,10 @@
 
 .t3-status-letter {
   display: flex;
-  align-items: baseline;
-  gap: 0.75rem;
+  flex-direction: column;
+  align-items: center;
+  width: var(--canvas-size);
+  gap: 0.25rem;
 }
 
 .t3-status-label {
@@ -106,13 +107,14 @@
   letter-spacing: 0.1em;
 }
 
-.t3-target-letter {
-  font-family: 'Orbitron', system-ui, sans-serif;
-  font-size: 3rem;
-  font-weight: 900;
-  color: var(--accent);
-  text-shadow: 0 0 20px var(--accent-glow);
-  line-height: 1;
+.t3-status-letter .dot-challenge-canvas {
+  width: 100% !important;
+  height: 140px !important;
+}
+
+.t3-status-dimmed {
+  opacity: 0.3;
+  transition: opacity 0.3s ease;
 }
 
 .t3-status-message {
@@ -120,7 +122,19 @@
   font-size: 0.85rem;
   color: var(--fail);
   margin-top: 0.25rem;
-  animation: fadeIn 0.3s ease;
+  animation: t3MsgFade 5s ease forwards;
+}
+
+@keyframes t3MsgFade {
+  0% {
+    opacity: 1;
+  }
+  60% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
 }
 
 .t3-status-nudge {

@@ -100,7 +100,7 @@ function wouldWin(board: Board, cellIndex: number, player: Player): boolean {
   return checkWinner(testBoard) !== null;
 }
 
-const LETTERS = 'ABCEFGHIJKLMNPRSTUVWXYZ';
+const LETTERS = 'ACEFHJKMNPRTWXY';
 
 export function randomLetter(): string {
   return LETTERS[Math.floor(Math.random() * LETTERS.length)];

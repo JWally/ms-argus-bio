@@ -10,6 +10,7 @@ export interface NormalizedStroke {
     tiltY: number;
     width: number;
     height: number;
+    coalescedCount: number;
   }[];
   startTime: number;
   endTime: number;
@@ -43,6 +44,11 @@ export interface DigitResult {
 
 // ── Biometric feature computation ────────────────────────────────────
 
+/** Check if the browser natively supports getCoalescedEvents */
+const COALESCED_SUPPORTED =
+  typeof PointerEvent !== 'undefined' &&
+  typeof PointerEvent.prototype.getCoalescedEvents === 'function';
+
 export function computeFeatures(strokes: Stroke[]) {
   const allPoints: StrokePoint[] = strokes.flatMap((s) => s.points);
   if (allPoints.length < 2) {
@@ -60,6 +66,11 @@ export function computeFeatures(strokes: Stroke[]) {
       avgTimeBetweenStrokes: 0,
       eventFrequencyHz: 0,
       avgJerk: 0,
+      coalescedRatio: 0,
+      rafCadenceRatio: 0,
+      velocityBellScore: 0,
+      interStrokePauseCV: 0,
+      coalescedSupported: COALESCED_SUPPORTED,
     };
   }
 
@@ -108,6 +119,78 @@ export function computeFeatures(strokes: Stroke[]) {
   }
   const totalTime = allPoints[allPoints.length - 1].t - allPoints[0].t;
 
+  // Coalesced event ratio: fraction of move events with coalesced count > 0.
+  // Real browsers coalesce 2-6 pointer events per frame dispatch; automation
+  // frameworks (Playwright, Puppeteer) always produce 0 coalesced events.
+  const movePoints = allPoints.slice(1); // skip first point (pointerdown)
+  const coalescedMoves = movePoints.filter((p) => p.coalescedCount > 0).length;
+  const coalescedRatio = movePoints.length > 0 ? coalescedMoves / movePoints.length : 0;
+
+  // ── rAF cadence ratio ──
+  // Real pointer events are dispatched during rAF processing, so inter-point
+  // deltas cluster tightly around multiples of the display's frame period.
+  // CDP-injected events (Playwright) arrive at arbitrary times — no clustering.
+  // Check against common refresh rates: 60Hz, 90Hz, 120Hz, 144Hz.
+  const FRAME_PERIODS = [16.667, 11.111, 8.333, 6.944]; // 60, 90, 120, 144 Hz
+  const TOLERANCE_MS = 2.5;
+  const dts: number[] = [];
+  for (const stroke of strokes) {
+    for (let i = 1; i < stroke.points.length; i++) {
+      const dt = stroke.points[i].t - stroke.points[i - 1].t;
+      if (dt > 0) dts.push(dt);
+    }
+  }
+  // For each frame period, count how many deltas are on-grid; take the best
+  let rafCadenceRatio = 0;
+  if (dts.length > 0) {
+    for (const framePeriod of FRAME_PERIODS) {
+      let onGrid = 0;
+      for (const dt of dts) {
+        const remainder = dt % framePeriod;
+        if (remainder < TOLERANCE_MS || framePeriod - remainder < TOLERANCE_MS) {
+          onGrid++;
+        }
+      }
+      rafCadenceRatio = Math.max(rafCadenceRatio, onGrid / dts.length);
+    }
+  }
+
+  // ── Velocity bell score ──
+  // Human strokes follow the "minimum jerk" principle: slow-fast-slow velocity
+  // profile (bell-shaped). We compare each stroke's velocity profile against
+  // sin(π * progress) and average the fit across all strokes.
+  let bellScoreSum = 0;
+  let bellCount = 0;
+  for (const stroke of strokes) {
+    if (stroke.points.length < 5) continue;
+    const velocities: number[] = [];
+    for (let i = 1; i < stroke.points.length; i++) {
+      const dx = stroke.points[i].x - stroke.points[i - 1].x;
+      const dy = stroke.points[i].y - stroke.points[i - 1].y;
+      const dt = stroke.points[i].t - stroke.points[i - 1].t;
+      velocities.push(dt > 0 ? Math.sqrt(dx * dx + dy * dy) / dt : 0);
+    }
+    const maxV = Math.max(...velocities);
+    if (maxV === 0) continue;
+    const normalized = velocities.map((v) => v / maxV);
+    let error = 0;
+    for (let i = 0; i < normalized.length; i++) {
+      const expected = Math.sin(Math.PI * ((i + 0.5) / normalized.length));
+      error += Math.abs(normalized[i] - expected);
+    }
+    bellScoreSum += 1 - error / normalized.length;
+    bellCount++;
+  }
+  const velocityBellScore = bellCount > 0 ? bellScoreSum / bellCount : 0;
+
+  // ── Inter-stroke pause CV ──
+  // Humans have bimodal pauses: short within characters (~50-200ms), long
+  // between characters (~300-2000ms) → high CV. Bots drawing from a single
+  // distribution (e.g., logNormal(90, 0.4)) produce uniform-ish pauses → low CV.
+  const gapAvg = avg(strokeGaps);
+  const gapStddev = Math.sqrt(variance(strokeGaps));
+  const interStrokePauseCV = gapAvg > 0 ? gapStddev / gapAvg : 0;
+
   return {
     strokeCount: strokes.length,
     totalPoints: allPoints.length,
@@ -122,7 +205,84 @@ export function computeFeatures(strokes: Stroke[]) {
     avgTimeBetweenStrokes: avg(strokeGaps),
     eventFrequencyHz: totalTime > 0 ? (allPoints.length / totalTime) * 1000 : 0,
     avgJerk: avg(jerks),
+    coalescedRatio,
+    rafCadenceRatio,
+    velocityBellScore,
+    interStrokePauseCV,
+    coalescedSupported: COALESCED_SUPPORTED,
   };
+}
+
+// ── Prototype tamper detection ──────────────────────────────────────
+// Lightweight checks inspired by ms-argus-web's lies module.
+// Tests APIs we rely on for bot detection (coalescedEvents, etc.).
+// If any are tampered with (toString, descriptor, etc.), flag it.
+
+const NATIVE_RE = /\{\s*\[native code\]\s*\}/;
+
+function isNative(fn: unknown): boolean {
+  if (typeof fn !== 'function') return false;
+  try {
+    return NATIVE_RE.test(Function.prototype.toString.call(fn));
+  } catch {
+    return false;
+  }
+}
+
+function hasCleanDescriptors(fn: unknown): boolean {
+  if (typeof fn !== 'function') return false;
+  try {
+    // Native functions should NOT have 'prototype' as own property
+    // (instance methods like getCoalescedEvents don't have .prototype)
+    const names = Object.getOwnPropertyNames(fn);
+    if (names.includes('prototype') || names.includes('arguments') || names.includes('caller')) {
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Check critical APIs for tampering. Returns list of tampered API names. */
+export function detectTampering(): string[] {
+  const tampered: string[] = [];
+
+  // APIs we depend on for bot detection signals
+  const checks: [string, () => unknown][] = [
+    ['PointerEvent.prototype.getCoalescedEvents', () => PointerEvent.prototype.getCoalescedEvents],
+    ['PointerEvent.prototype.getPredictedEvents', () => PointerEvent.prototype.getPredictedEvents],
+    ['Element.prototype.getBoundingClientRect', () => Element.prototype.getBoundingClientRect],
+    ['HTMLCanvasElement.prototype.getContext', () => HTMLCanvasElement.prototype.getContext],
+    ['Performance.prototype.now', () => Performance.prototype.now],
+  ];
+
+  for (const [name, getFn] of checks) {
+    try {
+      const fn = getFn();
+      // Skip if the API doesn't exist (unsupported browser, not tampering)
+      if (typeof fn === 'undefined') continue;
+      if (!isNative(fn) || !hasCleanDescriptors(fn)) {
+        tampered.push(name);
+      }
+    } catch {
+      // If the API doesn't exist (old browser), skip — not tampering
+    }
+  }
+
+  // Also check if Function.prototype.toString itself has been tampered
+  // (bot could override toString to hide its patches)
+  try {
+    const toStr = Function.prototype.toString;
+    const toStrStr = Function.prototype.toString.call(toStr);
+    if (!NATIVE_RE.test(toStrStr)) {
+      tampered.push('Function.prototype.toString');
+    }
+  } catch {
+    tampered.push('Function.prototype.toString');
+  }
+
+  return tampered;
 }
 
 export function normalizeStrokes(
@@ -140,6 +300,7 @@ export function normalizeStrokes(
       tiltY: p.tiltY,
       width: p.width,
       height: p.height,
+      coalescedCount: p.coalescedCount,
     })),
     startTime: s.startTime - startTime,
     endTime: s.endTime - startTime,

@@ -5,6 +5,7 @@ import type { BiometricPayload, AggregateFeatures } from './types';
 function makePayload(overrides: {
   completionTimeMs?: number;
   passed?: boolean;
+  inputType?: BiometricPayload['inputType'];
   features?: Partial<AggregateFeatures>;
 }): BiometricPayload {
   const defaultFeatures: AggregateFeatures = {
@@ -21,6 +22,11 @@ function makePayload(overrides: {
     avgTimeBetweenStrokes: 200,
     eventFrequencyHz: 60,
     avgJerk: 0.01,
+    coalescedRatio: 0.5,
+    rafCadenceRatio: 0.6,
+    velocityBellScore: 0.5,
+    interStrokePauseCV: 0.5,
+    coalescedSupported: true,
   };
 
   return {
@@ -40,7 +46,7 @@ function makePayload(overrides: {
       },
     ],
     confidenceTimeline: [],
-    inputType: 'mouse',
+    inputType: overrides.inputType ?? 'mouse',
     screenWidth: 1920,
     screenHeight: 1080,
     devicePixelRatio: 2,
@@ -52,71 +58,98 @@ function makePayload(overrides: {
 describe('heuristicLabel', () => {
   describe('bot signals', () => {
     it('flags completionTimeMs < 500 as bot', () => {
-      expect(heuristicLabel(makePayload({ completionTimeMs: 200 }))).toBe('bot');
+      expect(heuristicLabel(makePayload({ completionTimeMs: 200 })).label).toBe('bot');
     });
 
     it('flags eventFrequencyHz > 300 as bot', () => {
-      expect(heuristicLabel(makePayload({ features: { eventFrequencyHz: 500 } }))).toBe('bot');
-    });
-
-    it('flags zero speedVariance with many points as bot', () => {
-      expect(heuristicLabel(makePayload({ features: { speedVariance: 0, totalPoints: 50 } }))).toBe(
+      expect(heuristicLabel(makePayload({ features: { eventFrequencyHz: 500 } })).label).toBe(
         'bot'
       );
     });
 
-    it('does NOT flag zero speedVariance with few points as bot', () => {
-      // Few points could legitimately have zero variance
+    it('flags zero speedVariance with many points as bot', () => {
       expect(
-        heuristicLabel(makePayload({ features: { speedVariance: 0, totalPoints: 10 } }))
+        heuristicLabel(makePayload({ features: { speedVariance: 0, totalPoints: 50 } })).label
+      ).toBe('bot');
+    });
+
+    it('does NOT flag zero speedVariance with few points as bot', () => {
+      expect(
+        heuristicLabel(makePayload({ features: { speedVariance: 0, totalPoints: 10 } })).label
       ).not.toBe('bot');
     });
 
     it('bot signals take priority over human signals', () => {
-      // Meets human criteria but also triggers bot (too fast)
-      expect(heuristicLabel(makePayload({ completionTimeMs: 100, passed: true }))).toBe('bot');
+      expect(heuristicLabel(makePayload({ completionTimeMs: 100, passed: true })).label).toBe(
+        'bot'
+      );
+    });
+
+    it('flags zero pressure variance on touch when avgPressure > 0', () => {
+      const result = heuristicLabel(
+        makePayload({
+          inputType: 'touch',
+          features: { avgPressure: 0.5, pressureVariance: 0, totalPoints: 50 },
+        })
+      );
+      expect(result.label).toBe('bot');
+      expect(result.reason).toBe('zero-pressure-touch');
+    });
+
+    it('does NOT flag zero pressure on iOS Safari (avgPressure === 0)', () => {
+      // iOS Safari reports pressure: 0 for all touch events — not a bot signal
+      const result = heuristicLabel(
+        makePayload({
+          inputType: 'touch',
+          features: {
+            avgPressure: 0,
+            pressureVariance: 0,
+            totalPoints: 50,
+            coalescedSupported: true,
+          },
+        })
+      );
+      expect(result.label).not.toBe('bot');
     });
   });
 
   describe('human signals', () => {
     it('labels as human when all human criteria are met', () => {
-      expect(heuristicLabel(makePayload({}))).toBe('human');
+      expect(heuristicLabel(makePayload({})).label).toBe('human');
     });
 
     it('requires passed === true', () => {
-      expect(heuristicLabel(makePayload({ passed: false }))).toBe('uncertain');
+      expect(heuristicLabel(makePayload({ passed: false })).label).toBe('uncertain');
     });
 
     it('requires speedVariance > 0', () => {
-      // totalPoints <= 20 so it doesn't trigger bot rule
-      expect(heuristicLabel(makePayload({ features: { speedVariance: 0, totalPoints: 15 } }))).toBe(
-        'uncertain'
-      );
+      expect(
+        heuristicLabel(makePayload({ features: { speedVariance: 0, totalPoints: 15 } })).label
+      ).toBe('uncertain');
     });
 
     it('requires completionTimeMs > 1000', () => {
-      expect(heuristicLabel(makePayload({ completionTimeMs: 800 }))).toBe('uncertain');
+      expect(heuristicLabel(makePayload({ completionTimeMs: 800 })).label).toBe('uncertain');
     });
 
     it('requires completionTimeMs < 45000', () => {
-      expect(heuristicLabel(makePayload({ completionTimeMs: 50000 }))).toBe('uncertain');
+      expect(heuristicLabel(makePayload({ completionTimeMs: 50000 })).label).toBe('uncertain');
     });
 
     it('requires strokeCount >= 3', () => {
-      expect(heuristicLabel(makePayload({ features: { strokeCount: 2 } }))).toBe('uncertain');
+      expect(heuristicLabel(makePayload({ features: { strokeCount: 2 } })).label).toBe('uncertain');
     });
 
     it('requires totalPoints > 10', () => {
-      expect(heuristicLabel(makePayload({ features: { totalPoints: 5 } }))).toBe('uncertain');
+      expect(heuristicLabel(makePayload({ features: { totalPoints: 5 } })).label).toBe('uncertain');
     });
   });
 
   describe('uncertain', () => {
     it('returns uncertain when neither bot nor human criteria are fully met', () => {
-      // Not a bot (timing is fine) but not human (passed=false)
-      expect(heuristicLabel(makePayload({ completionTimeMs: 2000, passed: false }))).toBe(
-        'uncertain'
-      );
+      const result = heuristicLabel(makePayload({ completionTimeMs: 2000, passed: false }));
+      expect(result.label).toBe('uncertain');
+      expect(result.reason).toContain('not-passed');
     });
   });
 });

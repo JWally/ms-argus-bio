@@ -37,11 +37,11 @@ vi.mock('./qdrant-client', () => ({
   },
 }));
 
-const mockEncode = vi.fn().mockReturnValue(new Array(66).fill(0.5));
+const mockEncode = vi.fn().mockReturnValue(new Array(70).fill(0.5));
 vi.mock('./embedding', () => ({
   encode: (...args: unknown[]) => mockEncode(...args),
-  EMBEDDING_VERSION: 'v3',
-  EMBEDDING_DIMS: 66,
+  EMBEDDING_VERSION: 'v5',
+  EMBEDDING_DIMS: 70,
 }));
 
 const mockHeuristicLabel = vi.fn().mockReturnValue('human');
@@ -311,6 +311,7 @@ describe('POST /v1/classify', () => {
 
 describe('POST /v1/session', () => {
   it('returns 400 for missing fields', async () => {
+    mockLookupMerchant.mockResolvedValue(MERCHANT);
     const result = (await handler(makeEvent(POST, ROUTE_SESSION, { secret: TEST_SECRET }))) as {
       statusCode: number;
     };
@@ -366,6 +367,7 @@ describe('POST /v1/session', () => {
 
 describe('POST /v1/verify', () => {
   it('returns 400 for missing fields', async () => {
+    mockLookupMerchant.mockResolvedValue(MERCHANT);
     const result = (await handler(makeEvent(POST, ROUTE_VERIFY, { secret: TEST_SECRET }))) as {
       statusCode: number;
     };

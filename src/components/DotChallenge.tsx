@@ -1,19 +1,22 @@
 import { useRef, useEffect, useMemo } from 'react';
 
 interface DotChallengeProps {
-  glyphs: string[];
+  /** Base64-encoded 1-bit packed masks from the server (one per glyph) */
+  masks: string[];
+  maskWidth: number;
+  maskHeight: number;
   currentIndex: number;
 }
 
-// Color palettes
+// Color palettes — bright letter dots, dim background dots
 const DIGIT_PALETTES = {
-  current: ['#6366f1', '#818cf8', '#7c3aed', '#8b5cf6', '#a78bfa'],
-  done: ['#555568', '#5a5a6e', '#4e4e62', '#606074', '#52526a'],
-  upcoming: ['#555568', '#5a5a6e', '#4e4e62', '#606074', '#52526a'],
+  current: ['#a5b4fc', '#c4b5fd', '#93c5fd', '#c084fc', '#e0e7ff'],
+  done: ['#444458', '#4a4a5e', '#3e3e52', '#505064', '#42425a'],
+  upcoming: ['#444458', '#4a4a5e', '#3e3e52', '#505064', '#42425a'],
 };
 
-const BG_MUTED = ['#26263a', '#1e1e32', '#222236', '#2a2a3e', '#202034'];
-const BG_SPOTLIGHT = ['#32325a', '#383868', '#2e2e54', '#363660', '#3a3a62'];
+const BG_MUTED = ['#161624', '#131320', '#151528', '#181830', '#121220'];
+const BG_SPOTLIGHT = ['#1e1e38', '#222240', '#1a1a34', '#202042', '#1c1c36'];
 
 const DOT_R = 3;
 const GAP = 6;
@@ -35,21 +38,37 @@ interface Dot {
   frameGroup: number;
 }
 
-function buildMask(glyphs: string[], w: number, h: number, slotW: number): Uint8ClampedArray {
-  const off = document.createElement('canvas');
-  off.width = w;
-  off.height = h;
-  const oc = off.getContext('2d', { willReadFrequently: true })!;
-  oc.fillStyle = '#000';
-  oc.fillRect(0, 0, w, h);
-  oc.fillStyle = '#fff';
-  oc.font = `900 ${h * 0.72}px system-ui, -apple-system, sans-serif`;
-  oc.textAlign = 'center';
-  oc.textBaseline = 'middle';
-  for (let i = 0; i < glyphs.length; i++) {
-    oc.fillText(glyphs[i], slotW * i + slotW / 2, h / 2 + 2);
+/** Unpack a base64-encoded 1-bit mask into a boolean lookup array */
+function unpackMask(b64: string, mw: number, mh: number): Uint8Array {
+  const raw = atob(b64);
+  const bytes = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) {
+    bytes[i] = raw.charCodeAt(i);
   }
-  return oc.getImageData(0, 0, w, h).data;
+  const bits = new Uint8Array(mw * mh);
+  for (let i = 0; i < mw * mh; i++) {
+    const byteIdx = Math.floor(i / 8);
+    const bitIdx = 7 - (i % 8);
+    bits[i] = (bytes[byteIdx] >> bitIdx) & 1;
+  }
+  return bits;
+}
+
+interface SampleMaskOpts {
+  maskBits: Uint8Array;
+  mw: number;
+  mh: number;
+  x: number;
+  y: number;
+  containerW: number;
+  containerH: number;
+}
+
+/** Sample the pre-computed mask at scaled coordinates (nearest-neighbor) */
+function sampleMask({ maskBits, mw, mh, x, y, containerW, containerH }: SampleMaskOpts): boolean {
+  const mx = Math.min(mw - 1, Math.max(0, Math.floor((x / containerW) * mw)));
+  const my = Math.min(mh - 1, Math.max(0, Math.floor((y / containerH) * mh)));
+  return maskBits[my * mw + mx] === 1;
 }
 
 interface BgColorOpts {
@@ -78,27 +97,27 @@ function pickRadius(): number {
 }
 
 interface ComputeDotsOpts {
-  glyphs: string[];
+  maskBits: Uint8Array;
+  mw: number;
+  mh: number;
   activeSlot: number;
-  mask: Uint8ClampedArray;
   w: number;
   h: number;
   slotW: number;
 }
 
-function computeDots({ glyphs, activeSlot, mask, w, h, slotW }: ComputeDotsOpts): Dot[] {
+function computeDots({ maskBits, mw, mh, activeSlot, w, h, slotW }: ComputeDotsOpts): Dot[] {
   const dots: Dot[] = [];
+  const numSlots = 1; // We show one glyph at a time
   for (let y = DOT_R + 1; y < h - DOT_R; y += GAP) {
     for (let x = DOT_R + 1; x < w - DOT_R; x += GAP) {
       const jx = x + (Math.random() - 0.5) * GAP * 0.55;
       const jy = y + (Math.random() - 0.5) * GAP * 0.55;
 
-      const slot = Math.min(glyphs.length - 1, Math.floor(jx / slotW));
+      const slot = Math.min(numSlots - 1, Math.floor(jx / slotW));
       const state = slot < activeSlot ? 'done' : slot === activeSlot ? 'current' : 'upcoming';
 
-      const px = Math.max(0, Math.min(w - 1, Math.round(jx)));
-      const py = Math.max(0, Math.min(h - 1, Math.round(jy)));
-      const isDigit = mask[(py * w + px) * 4] > 128;
+      const isDigit = sampleMask({ maskBits, mw, mh, x: jx, y: jy, containerW: w, containerH: h });
 
       const bgColor = pickBgColor({ state, jx, jy, slotW, slot, h });
       const realColor = isDigit ? pick(DIGIT_PALETTES[state]) : bgColor;
@@ -117,16 +136,24 @@ function computeDots({ glyphs, activeSlot, mask, w, h, slotW }: ComputeDotsOpts)
   return dots;
 }
 
-export default function DotChallenge({ glyphs, currentIndex }: DotChallengeProps) {
+export default function DotChallenge({
+  masks,
+  maskWidth,
+  maskHeight,
+  currentIndex,
+}: DotChallengeProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef(0);
 
-  const visibleGlyphs = useMemo(() => [glyphs[currentIndex]], [glyphs, currentIndex]);
+  const currentMask = useMemo(
+    () => (masks[currentIndex] ? unpackMask(masks[currentIndex], maskWidth, maskHeight) : null),
+    [masks, currentIndex, maskWidth, maskHeight]
+  );
   const activeSlot = 0;
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas || !currentMask) return;
 
     const containerWidth = canvas.parentElement?.clientWidth ?? 280;
     const w = containerWidth;
@@ -141,9 +168,16 @@ export default function DotChallenge({ glyphs, currentIndex }: DotChallengeProps
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const slotW = w / visibleGlyphs.length;
-    const mask = buildMask(visibleGlyphs, w, h, slotW);
-    const dots = computeDots({ glyphs: visibleGlyphs, activeSlot, mask, w, h, slotW });
+    const slotW = w;
+    const dots = computeDots({
+      maskBits: currentMask,
+      mw: maskWidth,
+      mh: maskHeight,
+      activeSlot,
+      w,
+      h,
+      slotW,
+    });
 
     // Temporal multiplexing: only 1/5 of digit dots show per frame.
     // Human eye integrates all 5 at 60fps = clear. Screenshot = 20% signal.
@@ -184,7 +218,7 @@ export default function DotChallenge({ glyphs, currentIndex }: DotChallengeProps
 
     rafRef.current = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(rafRef.current);
-  }, [visibleGlyphs, activeSlot]);
+  }, [currentMask, maskWidth, maskHeight, activeSlot]);
 
   return <canvas ref={canvasRef} className="dot-challenge-canvas" aria-hidden="true" />;
 }

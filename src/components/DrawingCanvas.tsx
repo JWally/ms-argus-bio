@@ -9,6 +9,9 @@ export interface StrokePoint {
   tiltY: number;
   width: number;
   height: number;
+  /** Number of coalesced pointer events in this dispatch. Real browsers coalesce
+   *  2-6 events per frame; automation frameworks (Playwright/Puppeteer) always 0. */
+  coalescedCount: number;
 }
 
 export interface Stroke {
@@ -98,6 +101,7 @@ const DrawingCanvas = forwardRef<CanvasHandle, Props>(({ disabled }, ref) => {
         tiltY: e.tiltY,
         width: e.width,
         height: e.height,
+        coalescedCount: 0, // pointerdown is always a single event
       };
       currentStrokeRef.current = {
         points: [point],
@@ -116,6 +120,7 @@ const DrawingCanvas = forwardRef<CanvasHandle, Props>(({ disabled }, ref) => {
       if (!currentStrokeRef.current || disabled || !e.isTrusted) return;
       e.preventDefault();
       const pos = getPos(e);
+      const coalesced = (e.nativeEvent as PointerEvent).getCoalescedEvents?.() ?? [];
       const point: StrokePoint = {
         x: pos.x,
         y: pos.y,
@@ -125,6 +130,7 @@ const DrawingCanvas = forwardRef<CanvasHandle, Props>(({ disabled }, ref) => {
         tiltY: e.tiltY,
         width: e.width,
         height: e.height,
+        coalescedCount: coalesced.length,
       };
       currentStrokeRef.current.points.push(point);
       currentStrokeRef.current.endTime = point.t;
