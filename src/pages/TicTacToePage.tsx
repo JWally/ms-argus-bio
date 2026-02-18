@@ -9,6 +9,7 @@ import type { GameState, GameAction, Board } from '../game/t3-types';
 import type { Stroke } from '../components/DrawingCanvas';
 import { computeFeatures, normalizeStrokes, type VerdictResult } from '../utils/biometrics';
 import { buildClientMask, CLIENT_MASK_WIDTH, CLIENT_MASK_HEIGHT } from '../utils/mask';
+import { generateKeys, extractServerKey, encryptPayload, type CryptoKeys } from '../utils/crypto';
 import { renderTo28x28 } from '../ml/preprocess';
 import { formatTime } from '../components/Leaderboard';
 import '../styles/t3.css';
@@ -307,10 +308,13 @@ export default function TicTacToePage() {
   const gameStartTimeRef = useRef(0);
   // Server challenge data
   const challengeIdRef = useRef<string>('');
+  const cryptoKeysRef = useRef<CryptoKeys | null>(null);
+  const serverPubKeyRef = useRef<string>('');
   const [challengeMasks, setChallengeMasks] = useState<string[]>([]);
   const [maskDims, setMaskDims] = useState({ w: CLIENT_MASK_WIDTH, h: CLIENT_MASK_HEIGHT });
 
   /** Fetch a T3 challenge from the server, or fall back to client-side generation.
+   *  Also performs ECDH key exchange: sends client pubkey, extracts server pubkey.
    *  Returns the data; caller is responsible for updating state. */
   const fetchT3Challenge = useCallback(async () => {
     const fallback = {
@@ -320,10 +324,27 @@ export default function TicTacToePage() {
     };
     if (!API_URL) return fallback;
     try {
-      const res = await fetch(`${API_URL}/v1/challenge?mode=t3`);
+      // Generate ephemeral ECDH keys (or reuse)
+      if (!cryptoKeysRef.current) {
+        cryptoKeysRef.current = await generateKeys();
+      }
+
+      const headers: Record<string, string> = {};
+      if (cryptoKeysRef.current) {
+        headers['X-Canvas-Fp'] = cryptoKeysRef.current.rawPublicKey;
+      }
+
+      const res = await fetch(`${API_URL}/v1/challenge?mode=t3`, { headers });
       const data = await res.json();
+
+      // Extract server's public key appended to challengeId
+      const extracted = extractServerKey(data.challengeId as string);
+      if (extracted.serverPubKey) {
+        serverPubKeyRef.current = extracted.serverPubKey;
+      }
+
       return {
-        id: data.challengeId as string,
+        id: extracted.challengeId,
         masks: data.masks as string[],
         dims: { w: data.maskWidth as number, h: data.maskHeight as number },
       };
@@ -417,11 +438,27 @@ export default function TicTacToePage() {
     // eslint-disable-next-line no-console
     console.log('[ARGUS T3] Biometric Payload', payload);
 
-    fetch(`${API_URL}/v1/classify`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    })
+    // Encrypt if we have ECDH keys, otherwise fall back to plain JSON
+    const canEncrypt = cryptoKeysRef.current?.privateKey && serverPubKeyRef.current;
+    const sendRequest = canEncrypt
+      ? encryptPayload(payload, cryptoKeysRef.current!.privateKey, serverPubKeyRef.current).then(
+          (encrypted) =>
+            fetch(`${API_URL}/v1/classify`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/octet-stream',
+                'X-Canvas-Fp': cryptoKeysRef.current!.rawPublicKey,
+              },
+              body: encrypted.buffer as ArrayBuffer,
+            })
+        )
+      : fetch(`${API_URL}/v1/classify`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+
+    sendRequest
       .then((res) => res.json())
       .then((v) => {
         // eslint-disable-next-line no-console

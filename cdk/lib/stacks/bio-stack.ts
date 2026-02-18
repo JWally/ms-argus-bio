@@ -21,6 +21,8 @@ import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
 import * as route53 from 'aws-cdk-lib/aws-route53';
 import * as route53targets from 'aws-cdk-lib/aws-route53-targets';
 import * as acm from 'aws-cdk-lib/aws-certificatemanager';
+import * as events from 'aws-cdk-lib/aws-events';
+import * as targets from 'aws-cdk-lib/aws-events-targets';
 import { createVectorLambdaConfig, createPowertoolsEnv } from '../constructs/lambda-config';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -136,6 +138,53 @@ export class BioStack extends Stack {
     });
 
     // =========================================================================
+    // ECDH KEY MANAGEMENT (SSM + Rotation Lambda + EventBridge)
+    // =========================================================================
+
+    const ecdhKeyParam = new ssm.StringParameter(this, 'EcdhKeyParam', {
+      parameterName: `/${stackName}/ecdh-keypair`,
+      stringValue: '{}', // empty initial value — run scripts/generate-ecdh-key.ts to bootstrap
+      description: 'ECDH key pair for payload encryption (current + previous)',
+      tier: ssm.ParameterTier.STANDARD,
+    });
+
+    const rotationLogGroup = new logs.LogGroup(this, 'RotationLogGroup', {
+      logGroupName: `/aws/lambda/${stackName}-rotate-ecdh`,
+      retention: logs.RetentionDays.ONE_WEEK,
+      removalPolicy: RemovalPolicy.DESTROY,
+    });
+
+    const rotationFn = new lambda.NodejsFunction(this, 'RotateEcdhHandler', {
+      runtime: cdk.aws_lambda.Runtime.NODEJS_20_X,
+      architecture: cdk.aws_lambda.Architecture.ARM_64,
+      entry: path.join(__dirname, '../../../server/rotate-ecdh.ts'),
+      handler: 'handler',
+      functionName: `${stackName}-rotate-ecdh`,
+      memorySize: 128,
+      timeout: Duration.seconds(15),
+      logGroup: rotationLogGroup,
+      bundling: {
+        minify: true,
+        target: 'node20',
+        format: lambda.OutputFormat.CJS,
+      },
+      environment: {
+        ECDH_KEY_PARAM: ecdhKeyParam.parameterName,
+      },
+    });
+
+    // Rotation Lambda needs read+write to the SSM param
+    ecdhKeyParam.grantRead(rotationFn);
+    ecdhKeyParam.grantWrite(rotationFn);
+
+    // Schedule rotation every 14 days
+    new events.Rule(this, 'EcdhRotationSchedule', {
+      ruleName: `${stackName}-ecdh-rotation`,
+      schedule: events.Schedule.rate(Duration.days(14)),
+      targets: [new targets.LambdaFunction(rotationFn)],
+    });
+
+    // =========================================================================
     // LAMBDA FUNCTION
     // =========================================================================
 
@@ -159,8 +208,12 @@ export class BioStack extends Stack {
         SESSIONS_TABLE: sessionsTable.tableName,
         TOKENS_TABLE: tokensTable.tableName,
         SITE_DOMAIN: siteDomainName,
+        ECDH_KEY_PARAM: ecdhKeyParam.parameterName,
       },
     });
+
+    // Grant SSM read access for ECDH keys
+    ecdhKeyParam.grantRead(classifyFn);
 
     // Grant Secrets Manager access for Qdrant API key
     classifyFn.addToRolePolicy(
@@ -189,7 +242,7 @@ export class BioStack extends Stack {
           apigatewayv2.CorsHttpMethod.GET,
           apigatewayv2.CorsHttpMethod.OPTIONS,
         ],
-        allowHeaders: ['Content-Type'],
+        allowHeaders: ['Content-Type', 'X-Canvas-Fp'],
         maxAge: Duration.hours(1),
       },
     });

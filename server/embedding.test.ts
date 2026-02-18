@@ -11,13 +11,14 @@ function makeStroke(points: { x: number; y: number; t: number }[]): NormalizedSt
       tiltY: 0,
       width: 10,
       height: 10,
+      coalescedCount: 1,
     })),
     startTime: points[0]?.t ?? 0,
     endTime: points[points.length - 1]?.t ?? 0,
   };
 }
 
-function makePayload(overrides?: Partial<BiometricPayload>): BiometricPayload {
+function makePayload(overrides?: Partial<BiometricPayload>) {
   const stroke1 = makeStroke([
     { x: 0.1, y: 0.1, t: 0 },
     { x: 0.2, y: 0.15, t: 50 },
@@ -88,9 +89,13 @@ function makePayload(overrides?: Partial<BiometricPayload>): BiometricPayload {
       avgTimeBetweenStrokes: 200,
       eventFrequencyHz: 60,
       avgJerk: 0.01,
+      coalescedRatio: 0.5,
+      rafCadenceRatio: 1.0,
+      velocityBellScore: 0.7,
+      interStrokePauseCV: 0.3,
     },
     ...overrides,
-  };
+  } as BiometricPayload;
 }
 
 describe('encode', () => {
@@ -165,6 +170,10 @@ describe('encode', () => {
         avgTimeBetweenStrokes: 99999,
         eventFrequencyHz: 99999,
         avgJerk: 99999,
+        coalescedRatio: 99999,
+        rafCadenceRatio: 99999,
+        velocityBellScore: 99999,
+        interStrokePauseCV: 99999,
       },
     });
     const vec = encode(extreme);

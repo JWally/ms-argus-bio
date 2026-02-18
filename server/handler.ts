@@ -2,9 +2,11 @@
 // Lambda handler for biometric classification API
 
 import { randomBytes, createCipheriv, createDecipheriv, createHmac } from 'crypto';
+import { inflateRawSync } from 'zlib';
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
 import { Logger } from '@aws-lambda-powertools/logger';
 import { Metrics, MetricUnit } from '@aws-lambda-powertools/metrics';
+import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
 import { QdrantClient } from './qdrant-client';
 import { encode, EMBEDDING_VERSION, EMBEDDING_DIMS } from './embedding';
 import { heuristicLabel, timingCV } from './heuristics';
@@ -12,7 +14,7 @@ import { classify, K } from './classifier';
 import { lookupMerchantBySecret, validateReturnUrl } from './merchants';
 import { createSession, getSession, completeSession } from './sessions';
 import { createToken, redeemToken } from './tokens';
-import type { BiometricPayload, Verdict, ClassifyResponse } from './types';
+import type { BiometricPayload, Verdict, ClassifyResponse, Merchant } from './types';
 import { GLYPH_MASKS, MASK_WIDTH, MASK_HEIGHT } from './glyph-masks';
 
 const logger = new Logger();
@@ -147,6 +149,136 @@ function decryptChallenge(challengeId: string, now: number): DecryptedChallenge 
   }
 }
 
+// ── ECDH payload encryption ──────────────────────────────────────────
+// Server ECDH keys loaded from SSM Parameter Store with 30-min cache.
+// Used for key exchange in /v1/challenge and payload decryption in /v1/classify.
+
+interface EcdhKeyData {
+  privateKey: string;
+  publicKey: string;
+  rawPublicKey: string;
+  createdAt: number;
+}
+
+interface EcdhKeys {
+  current: EcdhKeyData;
+  previous?: EcdhKeyData;
+}
+
+const ssmClient = new SSMClient({});
+let cachedEcdhKeys: EcdhKeys | null = null;
+let ecdhKeysLoadedAt = 0;
+const ECDH_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
+
+async function loadEcdhKeyPair(): Promise<EcdhKeys | null> {
+  const paramName = process.env.ECDH_KEY_PARAM;
+  if (!paramName) return null;
+
+  if (cachedEcdhKeys && Date.now() - ecdhKeysLoadedAt < ECDH_CACHE_TTL_MS) {
+    return cachedEcdhKeys;
+  }
+
+  try {
+    const result = await ssmClient.send(
+      new GetParameterCommand({ Name: paramName, WithDecryption: true })
+    );
+    const parsed = JSON.parse(result.Parameter?.Value || '{}');
+    if (!parsed.current) return null;
+    cachedEcdhKeys = parsed as EcdhKeys;
+    ecdhKeysLoadedAt = Date.now();
+    return cachedEcdhKeys;
+  } catch (err) {
+    logger.warn('Failed to load ECDH keys from SSM', { error: err });
+    return cachedEcdhKeys; // return stale cache if available
+  }
+}
+
+const HKDF_INFO = new TextEncoder().encode('argus-bio-v1');
+
+/** Derive an AES-256-GCM key from ECDH shared secret + HKDF with a date salt */
+async function deriveAesKeyServer(
+  serverPrivKeyPkcs8: string,
+  clientPubKeyRaw: string,
+  dateSalt: string
+) {
+  // Import server private key (PKCS8 base64)
+  const privBytes = Buffer.from(serverPrivKeyPkcs8, 'base64');
+  const serverPrivKey = await crypto.subtle.importKey(
+    'pkcs8',
+    privBytes,
+    { name: 'ECDH', namedCurve: 'P-256' },
+    false,
+    ['deriveBits']
+  );
+
+  // Import client raw public key (65 bytes with 04 prefix)
+  const pubBytes = Buffer.from(clientPubKeyRaw, 'base64');
+  const clientPubKey = await crypto.subtle.importKey(
+    'raw',
+    pubBytes,
+    { name: 'ECDH', namedCurve: 'P-256' },
+    false,
+    []
+  );
+
+  // ECDH → 256-bit shared secret
+  const sharedBits = await crypto.subtle.deriveBits(
+    { name: 'ECDH', public: clientPubKey },
+    serverPrivKey,
+    256
+  );
+
+  // HKDF → AES-256-GCM key
+  const hkdfKey = await crypto.subtle.importKey('raw', sharedBits, 'HKDF', false, ['deriveKey']);
+  const salt = new TextEncoder().encode(dateSalt);
+  return crypto.subtle.deriveKey(
+    { name: 'HKDF', hash: 'SHA-256', salt, info: HKDF_INFO },
+    hkdfKey,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['decrypt']
+  );
+}
+
+/** Decrypt an encrypted biometric payload (octet-stream body).
+ *  Tries current key first, falls back to previous for in-flight rotation.
+ *  For each key, tries today's date salt first, then yesterday's (midnight edge case). */
+async function decryptPayload(
+  body: string,
+  isBase64Encoded: boolean,
+  clientPubKey: string,
+  ecdhKeys: EcdhKeys
+): Promise<BiometricPayload | null> {
+  // Decode binary body → split iv (12 bytes) + ciphertext+tag
+  const packed = isBase64Encoded ? Buffer.from(body, 'base64') : Buffer.from(body, 'utf-8');
+  const iv = packed.subarray(0, 12);
+  const ciphertextWithTag = packed.subarray(12);
+
+  const keySets = [ecdhKeys.current, ecdhKeys.previous].filter((k): k is EcdhKeyData => k != null);
+  const today = new Date().toISOString().slice(0, 10);
+  const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+  const dates = [today, yesterday];
+
+  for (const keySet of keySets) {
+    for (const dateSalt of dates) {
+      try {
+        const aesKey = await deriveAesKeyServer(keySet.privateKey, clientPubKey, dateSalt);
+        const decrypted = await crypto.subtle.decrypt(
+          { name: 'AES-GCM', iv },
+          aesKey,
+          ciphertextWithTag
+        );
+        const inflated = inflateRawSync(Buffer.from(decrypted));
+        return JSON.parse(inflated.toString('utf-8')) as BiometricPayload;
+      } catch {
+        continue; // try next key/date combo
+      }
+    }
+  }
+
+  return null;
+}
+
 /** Stop upserting new training vectors once collection reaches this size */
 const TRAINING_CAP = 1000;
 
@@ -185,7 +317,7 @@ function cors(response: APIGatewayProxyResultV2): APIGatewayProxyResultV2 {
   const headers = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type, X-Canvas-Fp',
     ...(typeof response === 'object' && 'headers' in response
       ? (response.headers as Record<string, string>)
       : {}),
@@ -229,7 +361,7 @@ function validatePayload(data: unknown): data is BiometricPayload {
 type RouteHandler = (event: APIGatewayProxyEventV2) => Promise<APIGatewayProxyResultV2>;
 
 const routes: Record<string, RouteHandler> = {
-  'GET /health': () => jsonResponse(200, { status: 'ok', timestamp: Date.now() }),
+  'GET /health': async () => jsonResponse(200, { status: 'ok', timestamp: Date.now() }),
   'GET /v1/challenge': handleChallenge,
   'POST /v1/session': handleCreateSession,
   'POST /v1/classify': handleClassify,
@@ -276,20 +408,25 @@ function isErrorResponse(v: unknown): v is APIGatewayProxyResultV2 {
 }
 
 /** Parse body and authenticate merchant by secret field. */
-async function parseAndAuth(event: APIGatewayProxyEventV2) {
+async function parseAndAuth(
+  event: APIGatewayProxyEventV2
+): Promise<
+  | { ok: false; error: APIGatewayProxyResultV2 }
+  | { ok: true; body: Record<string, unknown>; merchant: Merchant }
+> {
   const bodyOrError = safeParseBody(event);
-  if (isErrorResponse(bodyOrError)) return { error: bodyOrError } as const;
+  if (isErrorResponse(bodyOrError)) return { ok: false, error: bodyOrError };
 
   const secret = bodyOrError.secret as string | undefined;
-  if (!secret) return { error: jsonResponse(400, { error: 'Missing secret' }) } as const;
+  if (!secret) return { ok: false, error: jsonResponse(400, { error: 'Missing secret' }) };
 
   const merchant = await lookupMerchantBySecret(secret);
   if (!merchant) {
     logger.warn('Invalid API key', { prefix: secret.slice(0, 8) });
-    return { error: jsonResponse(401, INVALID_API_KEY) } as const;
+    return { ok: false, error: jsonResponse(401, INVALID_API_KEY) };
   }
 
-  return { body: bodyOrError, merchant } as const;
+  return { ok: true, body: bodyOrError, merchant };
 }
 
 /** Apply random bit-flip noise to a 1-bit packed mask (base64 → base64).
@@ -311,7 +448,17 @@ function noisifyMask(b64: string, noiseRate = 0.03): string {
 async function handleChallenge(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
   const mode = event.queryStringParameters?.mode;
   const glyphs = mode === 't3' ? generateT3Challenge() : generateServerChallenge();
-  const challengeId = encryptChallenge(glyphs, Date.now(), mode);
+  let challengeId = encryptChallenge(glyphs, Date.now(), mode);
+
+  // ECDH key exchange: if client sent its public key, append server's public key to challengeId.
+  // Client's raw public key arrives disguised as a canvas fingerprint header.
+  const clientPubKey = event.headers?.['x-canvas-fp'];
+  if (clientPubKey) {
+    const ecdhKeys = await loadEcdhKeyPair();
+    if (ecdhKeys) {
+      challengeId += ecdhKeys.current.rawPublicKey;
+    }
+  }
 
   // Send masks (with noise) instead of glyph characters.
   // The client never sees char or modelIndex — only the server can decrypt challengeId.
@@ -380,16 +527,41 @@ function validateChallengeAnswers(payload: BiometricPayload): APIGatewayProxyRes
   });
 }
 
+/** Parse the classify request body — encrypted (octet-stream) or plain JSON. */
+async function parseClassifyBody(
+  event: APIGatewayProxyEventV2
+): Promise<unknown | APIGatewayProxyResultV2> {
+  const contentType = event.headers?.['content-type'] ?? '';
+
+  if (contentType.includes('application/octet-stream')) {
+    const clientPubKey = event.headers?.['x-canvas-fp'];
+    const ecdhKeys = await loadEcdhKeyPair();
+    if (!ecdhKeys || !clientPubKey) {
+      return jsonResponse(400, { error: 'Encryption not configured' });
+    }
+    const decrypted = await decryptPayload(
+      event.body ?? '',
+      event.isBase64Encoded,
+      clientPubKey,
+      ecdhKeys
+    );
+    return decrypted ?? jsonResponse(400, { error: 'Decryption failed' });
+  }
+
+  // Plain JSON path (backwards compat)
+  try {
+    return parseBody(event);
+  } catch {
+    return jsonResponse(400, INVALID_JSON);
+  }
+}
+
 async function handleClassify(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
   const start = Date.now();
 
   try {
-    let payload: unknown;
-    try {
-      payload = parseBody(event);
-    } catch {
-      return jsonResponse(400, INVALID_JSON);
-    }
+    const payload = await parseClassifyBody(event);
+    if (isErrorResponse(payload)) return payload;
 
     if (!validatePayload(payload)) {
       return jsonResponse(400, { error: 'Invalid payload structure' });
@@ -536,7 +708,7 @@ async function handleCreateSession(
 ): Promise<APIGatewayProxyResultV2> {
   try {
     const auth = await parseAndAuth(event);
-    if ('error' in auth) return auth.error;
+    if (!auth.ok) return auth.error;
     const { body, merchant } = auth;
 
     const returnUrl = body.returnUrl as string | undefined;
@@ -567,7 +739,7 @@ async function handleCreateSession(
 async function handleVerify(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
   try {
     const auth = await parseAndAuth(event);
-    if ('error' in auth) return auth.error;
+    if (!auth.ok) return auth.error;
     const { body, merchant } = auth;
 
     const response = body.response as string | undefined;

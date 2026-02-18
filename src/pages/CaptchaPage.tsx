@@ -14,6 +14,7 @@ import {
   type VerdictResult,
 } from '../utils/biometrics';
 import { buildClientMask, CLIENT_MASK_WIDTH, CLIENT_MASK_HEIGHT } from '../utils/mask';
+import { generateKeys, extractServerKey, encryptPayload, type CryptoKeys } from '../utils/crypto';
 import '../App.css';
 
 type AppState = 'loading' | 'idle' | 'active' | 'complete';
@@ -125,15 +126,35 @@ export default function CaptchaPage() {
     new URLSearchParams(window.location.search).get('sid')
   );
   const challengeIdRef = useRef<string>('');
+  const cryptoKeysRef = useRef<CryptoKeys | null>(null);
+  const serverPubKeyRef = useRef<string>('');
   const [maskDims, setMaskDims] = useState({ w: CLIENT_MASK_WIDTH, h: CLIENT_MASK_HEIGHT });
 
-  /** Fetch a challenge from the server, or fall back to client-side generation */
+  /** Fetch a challenge from the server, or fall back to client-side generation.
+   *  Also performs ECDH key exchange: sends client pubkey, extracts server pubkey. */
   const fetchChallenge = useCallback(async (): Promise<Glyph[]> => {
     if (!API_URL) return generateFallbackChallenge();
     try {
-      const res = await fetch(`${API_URL}/v1/challenge`);
+      // Generate ephemeral ECDH keys (or reuse from previous round)
+      if (!cryptoKeysRef.current) {
+        cryptoKeysRef.current = await generateKeys();
+      }
+
+      const headers: Record<string, string> = {};
+      if (cryptoKeysRef.current) {
+        headers['X-Canvas-Fp'] = cryptoKeysRef.current.rawPublicKey;
+      }
+
+      const res = await fetch(`${API_URL}/v1/challenge`, { headers });
       const data = await res.json();
-      challengeIdRef.current = data.challengeId;
+
+      // Extract server's public key appended to challengeId
+      const extracted = extractServerKey(data.challengeId as string);
+      challengeIdRef.current = extracted.challengeId;
+      if (extracted.serverPubKey) {
+        serverPubKeyRef.current = extracted.serverPubKey;
+      }
+
       setMaskDims({ w: data.maskWidth, h: data.maskHeight });
       const masks = data.masks as string[];
       const types = data.types as ('digit' | 'letter')[];
@@ -198,12 +219,29 @@ export default function CaptchaPage() {
     const ctrl = new AbortController();
     const timeout = setTimeout(() => ctrl.abort(), 10_000);
 
-    fetch(`${API_URL}/v1/classify`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      signal: ctrl.signal,
-    })
+    // Encrypt if we have ECDH keys, otherwise fall back to plain JSON
+    const canEncrypt = cryptoKeysRef.current?.privateKey && serverPubKeyRef.current;
+    const sendRequest = canEncrypt
+      ? encryptPayload(payload, cryptoKeysRef.current!.privateKey, serverPubKeyRef.current).then(
+          (encrypted) =>
+            fetch(`${API_URL}/v1/classify`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/octet-stream',
+                'X-Canvas-Fp': cryptoKeysRef.current!.rawPublicKey,
+              },
+              body: encrypted.buffer as ArrayBuffer,
+              signal: ctrl.signal,
+            })
+        )
+      : fetch(`${API_URL}/v1/classify`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+          signal: ctrl.signal,
+        });
+
+    sendRequest
       .then((res) => res.json())
       .then((v) => {
         // eslint-disable-next-line no-console

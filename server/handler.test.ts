@@ -147,6 +147,10 @@ const VALID_PAYLOAD = {
     avgTimeBetweenStrokes: 200,
     eventFrequencyHz: 60,
     avgJerk: 0.01,
+    coalescedRatio: 0.5,
+    rafCadenceRatio: 1.0,
+    velocityBellScore: 0.7,
+    interStrokePauseCV: 0.3,
   },
 };
 
@@ -159,6 +163,9 @@ function makeEvent(method: string, path: string, body?: unknown): APIGatewayProx
     body: body ? JSON.stringify(body) : '',
     isBase64Encoded: false,
     headers: {},
+    version: '2.0',
+    routeKey: `${method} ${path}`,
+    rawQueryString: '',
   } as APIGatewayProxyEventV2;
 }
 
