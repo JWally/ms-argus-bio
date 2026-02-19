@@ -318,6 +318,7 @@ const TicTacToeCanvas = forwardRef<T3CanvasHandle, Props>(
         currentRichStrokeRef.current = null;
         dissolveStartRef.current = null;
         cancelAnimationFrame(dissolveRafRef.current);
+        renderFnRef.current();
       },
       dissolveCell: () => {
         dissolveStartRef.current = performance.now();

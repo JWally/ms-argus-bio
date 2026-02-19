@@ -11,9 +11,18 @@ interface Props {
   maskHeight: number;
   message: string;
   board: Board;
+  selectedCell: number | null;
 }
 
-export default function GameStatus({ phase, mask, maskWidth, maskHeight, message, board }: Props) {
+export default function GameStatus({
+  phase,
+  mask,
+  maskWidth,
+  maskHeight,
+  message,
+  board,
+  selectedCell,
+}: Props) {
   const isPlaying = phase === 'human-draw' || phase === 'human-recognize' || phase === 'ai-turn';
   const boardEmpty = board.every((c) => c === null);
   const dimmed = phase === 'ai-turn';
@@ -43,7 +52,7 @@ export default function GameStatus({ phase, mask, maskWidth, maskHeight, message
         </div>
       )}
 
-      {isPlaying && boardEmpty && !dimmed && (
+      {isPlaying && boardEmpty && !dimmed && selectedCell === null && (
         <div className="t3-status-nudge">Tap a cell, draw the letter, then hit NEXT</div>
       )}
 

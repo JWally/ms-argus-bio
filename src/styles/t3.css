@@ -21,6 +21,21 @@
   min-height: auto;
 }
 
+/* Small screens: hide subtitle, tighten gaps so NEXT button stays on-screen */
+@media (max-height: 740px), (max-width: 500px) {
+  .t3-compact .subtitle {
+    display: none;
+  }
+
+  .t3-compact {
+    gap: 0.35rem;
+  }
+
+  .t3-compact .t3-page {
+    gap: 0.35rem;
+  }
+}
+
 /* Canvas */
 .t3-canvas {
   border: 2px solid var(--border);
@@ -142,7 +157,78 @@
   font-size: 0.8rem;
   color: var(--text-muted);
   margin-top: 0.25rem;
-  animation: fadeIn 0.4s ease;
+  animation: nudgeThrob 2s ease-in-out infinite;
+}
+
+@keyframes nudgeThrob {
+  0%,
+  100% {
+    color: var(--text-muted);
+  }
+  50% {
+    color: #fff;
+  }
+}
+
+/* Clear button — amber/yellow */
+.t3-clear-btn {
+  width: var(--canvas-size);
+  font-family: 'Orbitron', system-ui, sans-serif;
+  font-size: 1.1rem;
+  font-weight: 800;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  text-align: center;
+  padding: 0.75rem 1rem;
+  border-radius: 10px;
+  border: 3px solid rgba(234, 179, 8, 0.4);
+  background: rgba(234, 179, 8, 0.1);
+  color: #eab308;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.t3-clear-btn:hover:not(:disabled) {
+  background: rgba(234, 179, 8, 0.2);
+  border-color: rgba(234, 179, 8, 0.7);
+  box-shadow: 0 0 20px rgba(234, 179, 8, 0.2);
+}
+
+.t3-clear-btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.t3-clear-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+/* Reset button — red, matching machine font */
+.t3-reset-btn {
+  width: var(--canvas-size);
+  font-family: 'Orbitron', system-ui, sans-serif;
+  font-size: 1.1rem;
+  font-weight: 800;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  text-align: center;
+  padding: 0.75rem 1rem;
+  border-radius: 10px;
+  border: 3px solid rgba(239, 68, 68, 0.4);
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.t3-reset-btn:hover {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: rgba(239, 68, 68, 0.7);
+  box-shadow: 0 0 20px rgba(239, 68, 68, 0.2);
+}
+
+.t3-reset-btn:active {
+  transform: scale(0.97);
 }
 
 /* Submit button */

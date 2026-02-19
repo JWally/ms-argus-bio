@@ -49,7 +49,7 @@ export interface GameState {
 
 export type GameAction =
   | { type: 'MODEL_LOADED' }
-  | { type: 'START_GAME' }
+  | { type: 'START_GAME'; aiFirst?: boolean }
   | { type: 'SELECT_CELL'; cellIndex: number }
   | {
       type: 'RECOGNIZE_SUCCESS';
@@ -59,4 +59,4 @@ export type GameAction =
     }
   | { type: 'RECOGNIZE_FAIL' }
   | { type: 'AI_MOVE'; cellIndex: number; letter: string }
-  | { type: 'RESET' };
+  | { type: 'RESET'; aiFirst?: boolean };

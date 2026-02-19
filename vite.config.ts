@@ -1,30 +1,49 @@
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
-import { obfuscator } from 'rollup-obfuscator';
+import JavaScriptObfuscator from 'javascript-obfuscator';
+
+/** Vite plugin that obfuscates app chunks but skips vendor/library chunks. */
+function obfuscatorPlugin(): Plugin {
+  return {
+    name: 'vite-plugin-obfuscate',
+    apply: 'build',
+    enforce: 'post',
+    renderChunk(code, chunk) {
+      if (!chunk.fileName.endsWith('.js')) return null;
+
+      // Skip vendor chunks — no need to obfuscate open-source libraries
+      const isVendor = chunk.fileName.includes('vendor');
+      if (isVendor) return null;
+
+      const result = JavaScriptObfuscator.obfuscate(code, {
+        compact: true,
+        stringArray: true,
+        stringArrayThreshold: 1,
+        stringArrayEncoding: ['rc4'],
+        stringArrayRotate: true,
+        stringArrayShuffle: true,
+        controlFlowFlattening: false,
+        deadCodeInjection: false,
+        identifierNamesGenerator: 'hexadecimal',
+        selfDefending: false,
+        transformObjectKeys: false,
+        unicodeEscapeSequence: false,
+      });
+      return { code: result.getObfuscatedCode(), map: null };
+    },
+  };
+}
 
 // https://vite.dev/config/
-export default defineConfig(({ mode }) => ({
-  plugins: [
-    react(),
-    ...(mode === 'production'
-      ? [
-          obfuscator({
-            include: ['src/**/*.ts', 'src/**/*.tsx'],
-            exclude: ['node_modules/**'],
-            options: {
-              stringEncryption: true,
-              controlFlowFlattening: true,
-              controlFlowFlatteningThreshold: 0.5,
-              deadCodeInjection: true,
-              deadCodeInjectionThreshold: 0.2,
-              selfDefending: true,
-              identifierNamesGenerator: 'hexadecimal',
-              stringArrayThreshold: 0.5,
-              transformObjectKeys: false,
-              unicodeEscapeSequence: false,
-            },
-          }),
-        ]
-      : []),
-  ],
-}));
+export default defineConfig({
+  plugins: [react(), obfuscatorPlugin()],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vendor: ['react', 'react-dom', '@tensorflow/tfjs'],
+        },
+      },
+    },
+  },
+});

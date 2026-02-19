@@ -118,13 +118,16 @@ function reducer(state: GameState, action: GameAction): GameState {
     case 'MODEL_LOADED':
       return { ...state, phase: 'idle', message: '' };
 
-    case 'START_GAME':
+    case 'START_GAME': {
+      const aiFirst = action.aiFirst ?? false;
       return {
         ...initialState(),
-        phase: PHASE_HUMAN_DRAW,
+        phase: aiFirst ? 'ai-turn' : PHASE_HUMAN_DRAW,
+        currentPlayer: aiFirst ? 'ai' : 'human',
         currentMaskIndex: 0,
         selectedCell: null,
       };
+    }
 
     case 'SELECT_CELL':
       if (state.board[action.cellIndex]) return state;
@@ -257,13 +260,16 @@ function reducer(state: GameState, action: GameAction): GameState {
       };
     }
 
-    case 'RESET':
+    case 'RESET': {
+      const aiFirst = action.aiFirst ?? false;
       return {
         ...initialState(),
-        phase: PHASE_HUMAN_DRAW,
+        phase: aiFirst ? 'ai-turn' : PHASE_HUMAN_DRAW,
+        currentPlayer: aiFirst ? 'ai' : 'human',
         currentMaskIndex: 0,
         selectedCell: null,
       };
+    }
 
     default:
       return state;
@@ -582,11 +588,20 @@ export default function TicTacToePage() {
   /** No-op — user must click the DONE button to submit their letter */
   const handleStrokeEnd = useCallback(() => {}, []);
 
+  /** Clear the active cell's strokes so the user can redraw */
+  const handleClear = useCallback(() => {
+    if (state.selectedCell === null) return;
+    canvasRef.current?.clearCell(state.selectedCell);
+    // Re-select the same cell to clear any stale error message
+    dispatch({ type: 'SELECT_CELL', cellIndex: state.selectedCell });
+  }, [state.selectedCell]);
+
   const handleCellSelect = useCallback(
     (cellIndex: number) => {
       if (state.phase === 'idle') {
         gameStartTimeRef.current = performance.now();
-        dispatch({ type: 'START_GAME' });
+        const aiFirst = Math.random() < 0.5;
+        dispatch({ type: 'START_GAME', aiFirst });
         return;
       }
       if (state.phase === PHASE_HUMAN_DRAW && cellIndex >= 0) {
@@ -605,7 +620,8 @@ export default function TicTacToePage() {
     setRetryMsg(null);
     // Fetch a fresh challenge for the new game
     await applyChallenge();
-    dispatch({ type: 'RESET' });
+    const aiFirst = Math.random() < 0.5;
+    dispatch({ type: 'RESET', aiFirst });
   }, [applyChallenge]);
 
   // Auto-reset after a retry (server challenge mismatch)
@@ -645,6 +661,7 @@ export default function TicTacToePage() {
           maskHeight={maskDims.h}
           message={state.message}
           board={state.board}
+          selectedCell={state.selectedCell}
         />
 
         <div ref={timerRef} className={timerClass}>
@@ -666,19 +683,29 @@ export default function TicTacToePage() {
 
         <div className="t3-actions">
           {state.phase !== 'game-over' && state.phase !== 'idle' && state.phase !== 'loading' && (
-            <button
-              className="t3-submit-btn"
-              onClick={handleSubmit}
-              disabled={state.phase !== PHASE_HUMAN_DRAW || state.selectedCell === null}
-              style={{ visibility: state.phase === 'ai-turn' ? 'hidden' : 'visible' }}
-            >
-              NEXT
-            </button>
+            <>
+              <button
+                className="t3-submit-btn"
+                onClick={handleSubmit}
+                disabled={state.phase !== PHASE_HUMAN_DRAW || state.selectedCell === null}
+                style={{ visibility: state.phase === 'ai-turn' ? 'hidden' : 'visible' }}
+              >
+                NEXT
+              </button>
+              <button
+                className="t3-clear-btn"
+                onClick={handleClear}
+                disabled={state.phase !== PHASE_HUMAN_DRAW || state.selectedCell === null}
+                style={{ visibility: state.phase === 'ai-turn' ? 'hidden' : 'visible' }}
+              >
+                CLEAR
+              </button>
+            </>
           )}
 
           {getEmptyCells(state.board).length < 9 && state.phase !== 'game-over' && (
-            <button onClick={handlePlayAgain} className="btn btn-secondary btn-stack">
-              Reset
+            <button onClick={handlePlayAgain} className="t3-reset-btn">
+              RESET
             </button>
           )}
         </div>
