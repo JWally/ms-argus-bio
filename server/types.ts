@@ -41,6 +41,7 @@ export interface NormalizedStroke {
     width: number;
     height: number;
     coalescedCount: number;
+    coalescedSpoofed?: boolean;
   }[];
   startTime: number;
   endTime: number;
@@ -69,6 +70,8 @@ export interface AggregateFeatures {
   eventFrequencyHz: number;
   avgJerk: number;
   coalescedRatio: number;
+  /** Fraction of move events with spoofed coalesced events (identical refs/coords/timestamps) */
+  coalescedSpoofedRatio?: number;
   rafCadenceRatio: number;
   velocityBellScore: number;
   interStrokePauseCV: number;

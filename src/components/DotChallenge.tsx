@@ -21,7 +21,9 @@ const BG_SPOTLIGHT = ['#1e1e38', '#222240', '#1a1a34', '#202042', '#1c1c36'];
 const DOT_R = 3;
 const GAP = 6;
 const H = 180;
-const NUM_FRAMES = 5;
+const NUM_FRAMES = 20;
+/** How many groups to show per frame (NUM_VISIBLE / NUM_FRAMES = visible ratio) */
+const NUM_VISIBLE = 4;
 const JITTER_PX = 1.5;
 
 function pick(arr: string[]): string {
@@ -194,7 +196,10 @@ export default function DotChallenge({
         const jx = dot.x + (Math.random() - 0.5) * JITTER_PX;
         const jy = dot.y + (Math.random() - 0.5) * JITTER_PX;
 
-        const color = dot.isDigit && dot.frameGroup !== frameIndex ? dot.bgColor : dot.realColor;
+        // Show NUM_VISIBLE consecutive groups each frame (same density, faster cycling)
+        const groupDist = (dot.frameGroup - frameIndex + NUM_FRAMES) % NUM_FRAMES;
+        const visible = groupDist < NUM_VISIBLE;
+        const color = dot.isDigit && !visible ? dot.bgColor : dot.realColor;
 
         let batch = batches.get(color);
         if (!batch) {

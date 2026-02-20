@@ -305,7 +305,52 @@ async function main() {
 
   model.summary();
 
-  // ── Training with early stopping + data augmentation ──
+  await trainWithEarlyStopping({
+    model,
+    trainXs,
+    trainYs,
+    testXs,
+    testYs,
+    trainCount: train.count,
+  });
+  await evaluateAndSave(model, testXs, testYs, test.count);
+
+  // Cleanup tensors
+  trainXs.dispose();
+  trainYs.dispose();
+  testXs.dispose();
+  testYs.dispose();
+}
+
+interface TrainOpts {
+  model: tf.Sequential;
+  trainXs: tf.Tensor4D;
+  trainYs: tf.Tensor2D;
+  testXs: tf.Tensor4D;
+  testYs: tf.Tensor2D;
+  trainCount: number;
+}
+
+function snapshotWeights(model: tf.Sequential, prev: tf.NamedTensorMap | null): tf.NamedTensorMap {
+  if (prev) {
+    for (const t of Object.values(prev)) t.dispose();
+  }
+  const snap: tf.NamedTensorMap = {};
+  for (const w of model.weights) {
+    snap[w.name] = w.read().clone();
+  }
+  return snap;
+}
+
+function restoreWeights(model: tf.Sequential, weights: tf.NamedTensorMap) {
+  for (const w of model.weights) {
+    if (weights[w.name]) w.write(weights[w.name]);
+  }
+  for (const t of Object.values(weights)) t.dispose();
+}
+
+async function trainWithEarlyStopping(opts: TrainOpts) {
+  const { model, trainXs, trainYs, testXs, testYs, trainCount } = opts;
   const maxEpochs = 50;
   const patience = 10;
   const batchSize = 128;
@@ -315,11 +360,10 @@ async function main() {
   let waitCount = 0;
 
   console.log(
-    `\nTraining on ${train.count} images (up to ${maxEpochs} epochs, early stopping patience=${patience})...\n`
+    `\nTraining on ${trainCount} images (up to ${maxEpochs} epochs, early stopping patience=${patience})...\n`
   );
 
   for (let epoch = 0; epoch < maxEpochs; epoch++) {
-    // Augment training data each epoch
     const augTrainXs = augment(trainXs);
     const history = await model.fit(augTrainXs, trainYs, {
       epochs: 1,
@@ -329,57 +373,46 @@ async function main() {
     });
     augTrainXs.dispose();
 
+    const valAcc = history.history.val_acc[0] as number;
+    const improved = valAcc > bestValAcc;
     const loss = (history.history.loss[0] as number).toFixed(4);
     const acc = ((history.history.acc[0] as number) * 100).toFixed(1);
     const valLoss = (history.history.val_loss[0] as number).toFixed(4);
-    const valAcc = history.history.val_acc[0] as number;
-    const valAccPct = (valAcc * 100).toFixed(1);
-
-    const improved = valAcc > bestValAcc;
     console.log(
-      `  Epoch ${epoch + 1}/${maxEpochs} — loss: ${loss}, acc: ${acc}% | val_loss: ${valLoss}, val_acc: ${valAccPct}%${improved ? ' ★' : ''}`
+      `  Epoch ${epoch + 1}/${maxEpochs} — loss: ${loss}, acc: ${acc}% | val_loss: ${valLoss}, val_acc: ${(valAcc * 100).toFixed(1)}%${improved ? ' ★' : ''}`
     );
 
     if (improved) {
       bestValAcc = valAcc;
-      // Save best weights
-      if (bestWeights) {
-        Object.values(bestWeights).forEach((t) => t.dispose());
-      }
-      bestWeights = {};
-      for (const w of model.weights) {
-        bestWeights[w.name] = w.read().clone();
-      }
+      bestWeights = snapshotWeights(model, bestWeights);
       waitCount = 0;
-    } else {
-      waitCount++;
-      if (waitCount >= patience) {
-        console.log(
-          `\n  Early stopping at epoch ${epoch + 1} (no improvement for ${patience} epochs)`
-        );
-        break;
-      }
+      continue;
+    }
+    waitCount++;
+    if (waitCount >= patience) {
+      console.log(
+        `\n  Early stopping at epoch ${epoch + 1} (no improvement for ${patience} epochs)`
+      );
+      break;
     }
   }
 
-  // Restore best weights
   if (bestWeights) {
     console.log(`\nRestoring best weights (val_acc: ${(bestValAcc * 100).toFixed(1)}%)...`);
-    for (const w of model.weights) {
-      if (bestWeights[w.name]) {
-        w.write(bestWeights[w.name]);
-      }
-    }
-    // Clean up cloned tensors
-    Object.values(bestWeights).forEach((t) => t.dispose());
+    restoreWeights(model, bestWeights);
   }
+}
 
-  // ── Final evaluation ──
+async function evaluateAndSave(
+  model: tf.Sequential,
+  testXs: tf.Tensor4D,
+  testYs: tf.Tensor2D,
+  testCount: number
+) {
   const result = model.evaluate(testXs, testYs) as tf.Tensor[];
   const testAcc = (await result[1].data())[0];
   console.log(`\nFinal test accuracy: ${(testAcc * 100).toFixed(2)}%`);
 
-  // ── Per-class accuracy ──
   console.log('\nPer-class accuracy:');
   const predictions = model.predict(testXs) as tf.Tensor;
   const predIndices = predictions.argMax(-1).dataSync();
@@ -389,7 +422,7 @@ async function main() {
   const classTotal = new Int32Array(NUM_CLASSES);
   const confusionCounts: Record<string, number> = {};
 
-  for (let i = 0; i < test.count; i++) {
+  for (let i = 0; i < testCount; i++) {
     const trueClass = trueIndices[i];
     const predClass = predIndices[i];
     classTotal[trueClass]++;
@@ -406,20 +439,17 @@ async function main() {
     console.log(`  ${TARGET_LETTERS[i]}: ${acc}% (${classCorrect[i]}/${classTotal[i]})`);
   }
 
-  // Top confusion pairs
   const confusionPairs = Object.entries(confusionCounts).sort((a, b) => b[1] - a[1]);
   console.log('\nTop confusion pairs:');
   for (const [pair, count] of confusionPairs.slice(0, 10)) {
     console.log(`  ${pair}: ${count}`);
   }
 
-  // ── Save model ──
   const modelDir = path.resolve('server/model');
   await mkdir(modelDir, { recursive: true });
   await model.save(`file://${modelDir}`);
   console.log(`\nModel saved to ${modelDir}/`);
 
-  // Save config.json with class mapping
   const config = {
     numClasses: NUM_CLASSES,
     letters: [...TARGET_LETTERS],
@@ -428,11 +458,6 @@ async function main() {
   await writeFile(path.join(modelDir, 'config.json'), JSON.stringify(config, null, 2) + '\n');
   console.log(`Config saved to ${modelDir}/config.json`);
 
-  // Cleanup tensors
-  trainXs.dispose();
-  trainYs.dispose();
-  testXs.dispose();
-  testYs.dispose();
   predictions.dispose();
   for (const t of result) t.dispose();
 }

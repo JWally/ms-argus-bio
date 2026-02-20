@@ -5,7 +5,8 @@
     "server/rotate-ecdh.ts",
     "cdk/bin/main.ts",
     "scripts/generate-masks.ts",
-    "scripts/generate-ecdh-key.ts"
+    "scripts/generate-ecdh-key.ts",
+    "scripts/generate-sbox.ts"
   ],
   "project": ["src/**/*.{ts,tsx}", "server/**/*.ts", "cdk/**/*.ts", "scripts/**/*.ts"],
   "ignore": ["**/*.test.ts"],

@@ -15,13 +15,8 @@ import {
   type VerdictResult,
 } from '../utils/biometrics';
 import { buildClientMask, CLIENT_MASK_WIDTH, CLIENT_MASK_HEIGHT } from '../utils/mask';
-import {
-  generateKeys,
-  extractServerKey,
-  encryptPayload,
-  decryptChallengeResponse,
-  type CryptoKeys,
-} from '../utils/crypto';
+import { extractServerKey } from '../utils/crypto';
+import { initCrypto, workerDecrypt, workerEncrypt } from '../utils/crypto-worker-client';
 import '../App.css';
 
 type AppState = 'loading' | 'idle' | 'active' | 'complete';
@@ -133,7 +128,7 @@ export default function CaptchaPage() {
     new URLSearchParams(window.location.search).get('sid')
   );
   const challengeIdRef = useRef<string>('');
-  const cryptoKeysRef = useRef<CryptoKeys | null>(null);
+  const rawPublicKeyRef = useRef<string>('');
   const serverPubKeyRef = useRef<string>('');
   const [maskDims, setMaskDims] = useState({ w: CLIENT_MASK_WIDTH, h: CLIENT_MASK_HEIGHT });
 
@@ -142,14 +137,15 @@ export default function CaptchaPage() {
   const fetchChallenge = useCallback(async (): Promise<Glyph[]> => {
     if (!API_URL) return generateFallbackChallenge();
     try {
-      // Generate ephemeral ECDH keys (or reuse from previous round)
-      if (!cryptoKeysRef.current) {
-        cryptoKeysRef.current = await generateKeys();
+      // Initialize Worker crypto (or reuse from previous round)
+      if (!rawPublicKeyRef.current) {
+        const { rawPublicKey } = await initCrypto();
+        rawPublicKeyRef.current = rawPublicKey;
       }
 
       const headers: Record<string, string> = {};
-      if (cryptoKeysRef.current) {
-        headers['X-Canvas-Fp'] = cryptoKeysRef.current.rawPublicKey;
+      if (rawPublicKeyRef.current) {
+        headers['X-Canvas-Fp'] = rawPublicKeyRef.current;
       }
 
       const res = await fetch(`${API_URL}/v1/challenge`, { headers });
@@ -165,12 +161,8 @@ export default function CaptchaPage() {
       // Decrypt encrypted challenge data if present (ECDH-encrypted masks)
       let masks: string[];
       let types: ('digit' | 'letter')[];
-      if (data.enc && cryptoKeysRef.current && extracted.serverPubKey) {
-        const decrypted = await decryptChallengeResponse(
-          data.enc as string,
-          cryptoKeysRef.current.privateKey,
-          extracted.serverPubKey
-        );
+      if (data.enc && rawPublicKeyRef.current && extracted.serverPubKey) {
+        const decrypted = await workerDecrypt(data.enc as string, extracted.serverPubKey);
         masks = decrypted.masks;
         types = decrypted.types;
         setMaskDims({ w: decrypted.maskWidth, h: decrypted.maskHeight });
@@ -242,19 +234,18 @@ export default function CaptchaPage() {
     const timeout = setTimeout(() => ctrl.abort(), 10_000);
 
     // Encrypt if we have ECDH keys, otherwise fall back to plain JSON
-    const canEncrypt = cryptoKeysRef.current?.privateKey && serverPubKeyRef.current;
+    const canEncrypt = rawPublicKeyRef.current && serverPubKeyRef.current;
     const sendRequest = canEncrypt
-      ? encryptPayload(payload, cryptoKeysRef.current!.privateKey, serverPubKeyRef.current).then(
-          (encrypted) =>
-            fetch(`${API_URL}/v1/classify`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/octet-stream',
-                'X-Canvas-Fp': cryptoKeysRef.current!.rawPublicKey,
-              },
-              body: encrypted.buffer as ArrayBuffer,
-              signal: ctrl.signal,
-            })
+      ? workerEncrypt(payload, serverPubKeyRef.current).then((encrypted) =>
+          fetch(`${API_URL}/v1/classify`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/octet-stream',
+              'X-Canvas-Fp': rawPublicKeyRef.current,
+            },
+            body: encrypted.buffer as ArrayBuffer,
+            signal: ctrl.signal,
+          })
         )
       : fetch(`${API_URL}/v1/classify`, {
           method: 'POST',
@@ -510,63 +501,94 @@ export default function CaptchaPage() {
             </div>
           )}
 
-          <div className="action-stack">
-            {(state === 'idle' || state === 'active') && (
-              <>
-                <button
-                  onClick={handleNext}
-                  className="btn btn-next btn-stack"
-                  disabled={state === 'idle'}
-                >
-                  Next
-                </button>
-                <button
-                  onClick={handleErase}
-                  className="btn btn-erase btn-stack"
-                  disabled={state === 'idle'}
-                >
-                  Erase
-                </button>
-              </>
-            )}
-            {state === 'complete' && retryMsg && (
-              <div className="retry-panel">
-                <div className="retry-icon">&#x21bb;</div>
-                <p className="retry-message">{retryMsg}</p>
-                <p className="retry-sub">Resetting automatically&hellip;</p>
-              </div>
-            )}
-            {state === 'complete' && finalResult && !retryMsg && (
-              <>
-                <ResultDisplay
-                  totalTimeMs={finalResult.totalTimeMs}
-                  timedOut={finalResult.timedOut}
-                  verdict={verdict}
-                />
-                <button onClick={handleReset} className="btn btn-primary btn-stack">
-                  Try Again
-                </button>
-                <button
-                  className={`btn btn-stack ${argusToken && returnUrl ? 'btn-primary' : 'btn-secondary'}`}
-                  disabled={!argusToken || !returnUrl}
-                  onClick={() => {
-                    if (argusToken && returnUrl) {
-                      window.location.href = `${returnUrl}?argus_token=${encodeURIComponent(argusToken)}`;
-                    }
-                  }}
-                >
-                  Continue
-                </button>
-                <StatsDrawer
-                  glyphs={challenge}
-                  digits={finalResult.digits}
-                  features={finalResult.features}
-                  verdict={verdict}
-                />
-              </>
-            )}
-          </div>
+          <ActionStack
+            state={state}
+            retryMsg={retryMsg}
+            finalResult={finalResult}
+            verdict={verdict}
+            challenge={challenge}
+            argusToken={argusToken}
+            returnUrl={returnUrl}
+            onNext={handleNext}
+            onErase={handleErase}
+            onReset={handleReset}
+          />
         </main>
+      )}
+    </div>
+  );
+}
+
+function ActionStack({
+  state,
+  retryMsg,
+  finalResult,
+  verdict,
+  challenge,
+  argusToken,
+  returnUrl,
+  onNext,
+  onErase,
+  onReset,
+}: {
+  state: AppState;
+  retryMsg: string | null;
+  finalResult: FinalResult | null;
+  verdict: VerdictResult | null;
+  challenge: Glyph[];
+  argusToken: string | null;
+  returnUrl: string | null;
+  onNext: () => void;
+  onErase: () => void;
+  onReset: () => void;
+}) {
+  return (
+    <div className="action-stack">
+      {(state === 'idle' || state === 'active') && (
+        <>
+          <button onClick={onNext} className="btn btn-next btn-stack" disabled={state === 'idle'}>
+            Next
+          </button>
+          <button onClick={onErase} className="btn btn-erase btn-stack" disabled={state === 'idle'}>
+            Erase
+          </button>
+        </>
+      )}
+      {state === 'complete' && retryMsg && (
+        <div className="retry-panel">
+          <div className="retry-icon">&#x21bb;</div>
+          <p className="retry-message">{retryMsg}</p>
+          <p className="retry-sub">Resetting automatically&hellip;</p>
+        </div>
+      )}
+      {state === 'complete' && finalResult && !retryMsg && (
+        <>
+          <ResultDisplay
+            totalTimeMs={finalResult.totalTimeMs}
+            timedOut={finalResult.timedOut}
+            verdict={verdict}
+          />
+          <button onClick={onReset} className="btn btn-primary btn-stack">
+            Try Again
+          </button>
+          <button
+            className={`btn btn-stack ${argusToken && returnUrl ? 'btn-primary' : 'btn-secondary'}`}
+            disabled={!argusToken || !returnUrl}
+            onClick={() => {
+              if (argusToken && returnUrl) {
+                window.location.href = `${returnUrl}?argus_token=${encodeURIComponent(argusToken)}`;
+              }
+            }}
+          >
+            Continue
+          </button>
+          <StatsDrawer
+            glyphs={challenge}
+            digits={finalResult.digits}
+            features={finalResult.features}
+            verdict={verdict}
+          />
+        </>
       )}
     </div>
   );

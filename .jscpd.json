@@ -1,7 +1,7 @@
 {
   "threshold": 5,
   "reporters": ["console"],
-  "ignore": ["node_modules", "dist", "cdk.out", "coverage", "**/*.test.ts"],
+  "ignore": ["node_modules", "dist", "cdk.out", "coverage", "**/*.test.ts", "**/sbox.ts"],
   "absolute": true,
   "format": ["typescript", "tsx"],
   "minLines": 5,

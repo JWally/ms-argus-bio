@@ -1,4 +1,5 @@
 import { forwardRef, useRef, useImperativeHandle, useEffect, useCallback } from 'react';
+import { isCoalescedSpoofed } from '../utils/pointer-utils';
 
 export interface StrokePoint {
   x: number;
@@ -12,6 +13,8 @@ export interface StrokePoint {
   /** Number of coalesced pointer events in this dispatch. Real browsers coalesce
    *  2-6 events per frame; automation frameworks (Playwright/Puppeteer) always 0. */
   coalescedCount: number;
+  /** True if coalesced events appear spoofed (identical refs/coords/timestamps) */
+  coalescedSpoofed: boolean;
 }
 
 export interface Stroke {
@@ -102,6 +105,7 @@ const DrawingCanvas = forwardRef<CanvasHandle, Props>(({ disabled }, ref) => {
         width: e.width,
         height: e.height,
         coalescedCount: 0, // pointerdown is always a single event
+        coalescedSpoofed: false,
       };
       currentStrokeRef.current = {
         points: [point],
@@ -131,6 +135,7 @@ const DrawingCanvas = forwardRef<CanvasHandle, Props>(({ disabled }, ref) => {
         width: e.width,
         height: e.height,
         coalescedCount: coalesced.length,
+        coalescedSpoofed: isCoalescedSpoofed(coalesced),
       };
       currentStrokeRef.current.points.push(point);
       currentStrokeRef.current.endTime = point.t;

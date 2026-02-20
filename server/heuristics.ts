@@ -79,6 +79,8 @@ function getBotReason(payload: BiometricPayload): string | null {
   // Using === true so missing/undefined field (old client JS) is also skipped.
   if (f.coalescedSupported === true && f.coalescedRatio === 0 && f.totalPoints > 20)
     return 'no-coalesced';
+  if ((f.coalescedSpoofedRatio ?? 0) > 0)
+    return `coalesced-spoofed:${((f.coalescedSpoofedRatio ?? 0) * 100).toFixed(1)}%`;
   // Touch/pen with zero pressure variance = synthetic events, BUT only
   // when the browser actually reports non-zero pressure. iOS Safari reports
   // pressure: 0 for ALL touch events (even though it now supports

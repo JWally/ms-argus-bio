@@ -1,0 +1,115 @@
+// Promise-based wrapper for the crypto Web Worker.
+// Falls back to direct crypto.ts calls if the Worker fails to load.
+
+import { generateKeys, encryptPayload, decryptChallengeResponse, type CryptoKeys } from './crypto';
+
+let worker: Worker | null = null;
+let msgId = 0;
+const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
+
+// Fallback state: when Worker can't load, use main-thread crypto
+let fallbackKeys: CryptoKeys | null = null;
+let usingWorker = false;
+
+function postAndWait<T>(msg: Record<string, unknown>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const id = ++msgId;
+    pending.set(id, {
+      resolve: resolve as (v: unknown) => void,
+      reject,
+    });
+    worker!.postMessage({ ...msg, id });
+  });
+}
+
+function handleMessage(e: MessageEvent) {
+  const { id, error, ...rest } = e.data;
+  const p = pending.get(id);
+  if (!p) return;
+  pending.delete(id);
+  if (error) {
+    p.reject(new Error(error));
+  } else {
+    p.resolve(rest);
+  }
+}
+
+/** Initialize crypto — spawns Worker if possible, falls back to main-thread.
+ *  Returns the raw public key string. */
+export async function initCrypto(): Promise<{ rawPublicKey: string; usingWorker: boolean }> {
+  // Try Worker first
+  try {
+    worker = new Worker(new URL('../workers/crypto.worker.ts', import.meta.url), {
+      type: 'module',
+    });
+    worker.onmessage = handleMessage;
+    worker.onerror = () => {
+      // Worker failed — fall through to fallback on next call
+      worker = null;
+      usingWorker = false;
+    };
+
+    const result = await postAndWait<{ rawPublicKey: string }>({ type: 'init' });
+    usingWorker = true;
+    return { rawPublicKey: result.rawPublicKey, usingWorker: true };
+  } catch {
+    // Worker failed to load — fall back to main thread
+    worker = null;
+    usingWorker = false;
+    fallbackKeys = await generateKeys();
+    return { rawPublicKey: fallbackKeys.rawPublicKey, usingWorker: false };
+  }
+}
+
+/** Decrypt challenge response from server. */
+export async function workerDecrypt(
+  encryptedB64: string,
+  serverPubKeyB64: string
+): Promise<{
+  masks: string[];
+  types: ('digit' | 'letter')[];
+  maskWidth: number;
+  maskHeight: number;
+}> {
+  if (usingWorker && worker) {
+    const result = await postAndWait<{
+      data: {
+        masks: string[];
+        types: ('digit' | 'letter')[];
+        maskWidth: number;
+        maskHeight: number;
+      };
+    }>({
+      type: 'decrypt',
+      encryptedB64,
+      serverPubKeyB64,
+    });
+    return result.data;
+  }
+
+  // Fallback: main-thread decryption
+  if (!fallbackKeys) throw new Error('Crypto not initialized');
+  return decryptChallengeResponse(encryptedB64, fallbackKeys.privateKey, serverPubKeyB64);
+}
+
+/** Encrypt payload for server. Returns Uint8Array. */
+export async function workerEncrypt(payload: object, serverPubKeyB64: string): Promise<Uint8Array> {
+  if (usingWorker && worker) {
+    const result = await postAndWait<{ encrypted: Uint8Array }>({
+      type: 'encrypt',
+      payload,
+      serverPubKeyB64,
+    });
+    return result.encrypted;
+  }
+
+  // Fallback: main-thread encryption
+  if (!fallbackKeys) throw new Error('Crypto not initialized');
+  return encryptPayload(payload, fallbackKeys.privateKey, serverPubKeyB64);
+}
+
+/** Get the raw public key for the current session (Worker or fallback). */
+export function getRawPublicKey(): string | null {
+  // The caller should have stored this from initCrypto result
+  return null;
+}

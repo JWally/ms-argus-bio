@@ -17,6 +17,7 @@ import { createToken, redeemToken } from './tokens';
 import type { BiometricPayload, Verdict, ClassifyResponse, Merchant } from './types';
 import { GLYPH_MASKS, MASK_WIDTH, MASK_HEIGHT } from './glyph-masks';
 import { inferLetter } from './inference';
+import { sboxApply } from './sbox';
 
 const logger = new Logger();
 const metrics = new Metrics();
@@ -252,7 +253,7 @@ async function encryptForClient(
   const today = new Date().toISOString().slice(0, 10);
   const aesKey = await deriveAesKeyServer(serverPrivKey, clientPubKey, today, ['encrypt']);
 
-  const plaintext = new TextEncoder().encode(JSON.stringify(data));
+  const plaintext = sboxApply(new TextEncoder().encode(JSON.stringify(data)));
   const iv = randomBytes(12);
   const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, aesKey, plaintext);
 

@@ -11,6 +11,7 @@ export interface NormalizedStroke {
     width: number;
     height: number;
     coalescedCount: number;
+    coalescedSpoofed: boolean;
   }[];
   startTime: number;
   endTime: number;
@@ -49,31 +50,14 @@ const COALESCED_SUPPORTED =
   typeof PointerEvent !== 'undefined' &&
   typeof PointerEvent.prototype.getCoalescedEvents === 'function';
 
-export function computeFeatures(strokes: Stroke[]) {
-  const allPoints: StrokePoint[] = strokes.flatMap((s) => s.points);
-  if (allPoints.length < 2) {
-    return {
-      strokeCount: strokes.length,
-      totalPoints: allPoints.length,
-      avgSpeed: 0,
-      speedVariance: 0,
-      maxSpeed: 0,
-      avgPressure: 0,
-      pressureVariance: 0,
-      avgContactWidth: 0,
-      avgContactHeight: 0,
-      totalDurationMs: 0,
-      avgTimeBetweenStrokes: 0,
-      eventFrequencyHz: 0,
-      avgJerk: 0,
-      coalescedRatio: 0,
-      rafCadenceRatio: 0,
-      velocityBellScore: 0,
-      interStrokePauseCV: 0,
-      coalescedSupported: COALESCED_SUPPORTED,
-    };
-  }
+const avg = (a: number[]) => (a.length ? a.reduce((s, v) => s + v, 0) / a.length : 0);
+const variance = (a: number[]) => {
+  const m = avg(a);
+  return a.length ? a.reduce((s, v) => s + (v - m) ** 2, 0) / a.length : 0;
+};
 
+/** Compute per-point speeds and accelerations across all strokes */
+function computeKinematics(strokes: Stroke[]) {
   const speeds: number[] = [];
   const accelerations: number[] = [];
   for (const stroke of strokes) {
@@ -98,39 +82,17 @@ export function computeFeatures(strokes: Stroke[]) {
       }
     }
   }
-
   const jerks: number[] = [];
   for (let i = 1; i < accelerations.length; i++) {
     jerks.push(Math.abs(accelerations[i] - accelerations[i - 1]));
   }
+  return { speeds, jerks };
+}
 
-  const avg = (a: number[]) => (a.length ? a.reduce((s, v) => s + v, 0) / a.length : 0);
-  const variance = (a: number[]) => {
-    const m = avg(a);
-    return a.length ? a.reduce((s, v) => s + (v - m) ** 2, 0) / a.length : 0;
-  };
-
-  const pressures = allPoints.map((p) => p.pressure);
-  const widths = allPoints.map((p) => p.width);
-  const heights = allPoints.map((p) => p.height);
-  const strokeGaps: number[] = [];
-  for (let i = 1; i < strokes.length; i++) {
-    strokeGaps.push(strokes[i].startTime - strokes[i - 1].endTime);
-  }
-  const totalTime = allPoints[allPoints.length - 1].t - allPoints[0].t;
-
-  // Coalesced event ratio: fraction of move events with coalesced count > 0.
-  // Real browsers coalesce 2-6 pointer events per frame dispatch; automation
-  // frameworks (Playwright, Puppeteer) always produce 0 coalesced events.
-  const movePoints = allPoints.slice(1); // skip first point (pointerdown)
-  const coalescedMoves = movePoints.filter((p) => p.coalescedCount > 0).length;
-  const coalescedRatio = movePoints.length > 0 ? coalescedMoves / movePoints.length : 0;
-
-  // ── rAF cadence ratio ──
-  // Real pointer events are dispatched during rAF processing, so inter-point
-  // deltas cluster tightly around multiples of the display's frame period.
-  // CDP-injected events (Playwright) arrive at arbitrary times — no clustering.
-  // Check against common refresh rates: 60Hz, 90Hz, 120Hz, 144Hz.
+/** Ratio of inter-point deltas aligned to common display refresh rates.
+ *  Real pointer events cluster around rAF frame boundaries;
+ *  CDP-injected events arrive at arbitrary times. */
+function computeRafCadenceRatio(strokes: Stroke[]): number {
   const FRAME_PERIODS = [16.667, 11.111, 8.333, 6.944]; // 60, 90, 120, 144 Hz
   const TOLERANCE_MS = 2.5;
   const dts: number[] = [];
@@ -140,25 +102,22 @@ export function computeFeatures(strokes: Stroke[]) {
       if (dt > 0) dts.push(dt);
     }
   }
-  // For each frame period, count how many deltas are on-grid; take the best
-  let rafCadenceRatio = 0;
-  if (dts.length > 0) {
-    for (const framePeriod of FRAME_PERIODS) {
-      let onGrid = 0;
-      for (const dt of dts) {
-        const remainder = dt % framePeriod;
-        if (remainder < TOLERANCE_MS || framePeriod - remainder < TOLERANCE_MS) {
-          onGrid++;
-        }
-      }
-      rafCadenceRatio = Math.max(rafCadenceRatio, onGrid / dts.length);
+  if (dts.length === 0) return 0;
+  let best = 0;
+  for (const framePeriod of FRAME_PERIODS) {
+    let onGrid = 0;
+    for (const dt of dts) {
+      const remainder = dt % framePeriod;
+      if (remainder < TOLERANCE_MS || framePeriod - remainder < TOLERANCE_MS) onGrid++;
     }
+    best = Math.max(best, onGrid / dts.length);
   }
+  return best;
+}
 
-  // ── Velocity bell score ──
-  // Human strokes follow the "minimum jerk" principle: slow-fast-slow velocity
-  // profile (bell-shaped). We compare each stroke's velocity profile against
-  // sin(π * progress) and average the fit across all strokes.
+/** Average fit of each stroke's velocity profile to a bell curve (min-jerk model).
+ *  Human strokes follow slow-fast-slow; bots tend to be more uniform. */
+function computeVelocityBellScore(strokes: Stroke[]): number {
   let bellScoreSum = 0;
   let bellCount = 0;
   for (const stroke of strokes) {
@@ -181,12 +140,61 @@ export function computeFeatures(strokes: Stroke[]) {
     bellScoreSum += 1 - error / normalized.length;
     bellCount++;
   }
-  const velocityBellScore = bellCount > 0 ? bellScoreSum / bellCount : 0;
+  return bellCount > 0 ? bellScoreSum / bellCount : 0;
+}
 
-  // ── Inter-stroke pause CV ──
-  // Humans have bimodal pauses: short within characters (~50-200ms), long
-  // between characters (~300-2000ms) → high CV. Bots drawing from a single
-  // distribution (e.g., logNormal(90, 0.4)) produce uniform-ish pauses → low CV.
+/** Coalesced event stats: ratio of moves with coalesced events, and spoofed ratio */
+function computeCoalescedStats(allPoints: StrokePoint[]) {
+  const movePoints = allPoints.slice(1); // skip first point (pointerdown)
+  if (movePoints.length === 0) return { coalescedRatio: 0, coalescedSpoofedRatio: 0 };
+  const coalescedMoves = movePoints.filter((p) => p.coalescedCount > 0).length;
+  const spoofedMoves = movePoints.filter((p) => p.coalescedSpoofed).length;
+  return {
+    coalescedRatio: coalescedMoves / movePoints.length,
+    coalescedSpoofedRatio: spoofedMoves / movePoints.length,
+  };
+}
+
+const EMPTY_FEATURES = {
+  strokeCount: 0,
+  totalPoints: 0,
+  avgSpeed: 0,
+  speedVariance: 0,
+  maxSpeed: 0,
+  avgPressure: 0,
+  pressureVariance: 0,
+  avgContactWidth: 0,
+  avgContactHeight: 0,
+  totalDurationMs: 0,
+  avgTimeBetweenStrokes: 0,
+  eventFrequencyHz: 0,
+  avgJerk: 0,
+  coalescedRatio: 0,
+  coalescedSpoofedRatio: 0,
+  rafCadenceRatio: 0,
+  velocityBellScore: 0,
+  interStrokePauseCV: 0,
+  coalescedSupported: COALESCED_SUPPORTED,
+};
+
+export function computeFeatures(strokes: Stroke[]) {
+  const allPoints: StrokePoint[] = strokes.flatMap((s) => s.points);
+  if (allPoints.length < 2) {
+    return { ...EMPTY_FEATURES, strokeCount: strokes.length, totalPoints: allPoints.length };
+  }
+
+  const { speeds, jerks } = computeKinematics(strokes);
+  const pressures = allPoints.map((p) => p.pressure);
+  const widths = allPoints.map((p) => p.width);
+  const heights = allPoints.map((p) => p.height);
+  const strokeGaps: number[] = [];
+  for (let i = 1; i < strokes.length; i++) {
+    strokeGaps.push(strokes[i].startTime - strokes[i - 1].endTime);
+  }
+  const totalTime = allPoints[allPoints.length - 1].t - allPoints[0].t;
+  const coalesced = computeCoalescedStats(allPoints);
+
+  // Inter-stroke pause CV: humans have bimodal pauses (within/between chars) → high CV
   const gapAvg = avg(strokeGaps);
   const gapStddev = Math.sqrt(variance(strokeGaps));
   const interStrokePauseCV = gapAvg > 0 ? gapStddev / gapAvg : 0;
@@ -205,9 +213,9 @@ export function computeFeatures(strokes: Stroke[]) {
     avgTimeBetweenStrokes: avg(strokeGaps),
     eventFrequencyHz: totalTime > 0 ? (allPoints.length / totalTime) * 1000 : 0,
     avgJerk: avg(jerks),
-    coalescedRatio,
-    rafCadenceRatio,
-    velocityBellScore,
+    ...coalesced,
+    rafCadenceRatio: computeRafCadenceRatio(strokes),
+    velocityBellScore: computeVelocityBellScore(strokes),
     interStrokePauseCV,
     coalescedSupported: COALESCED_SUPPORTED,
   };
@@ -308,88 +316,57 @@ function getPhantomWindow(): Window | null {
   }
 }
 
-/** Detect CDP usage, automation globals, and headless artifacts. */
-export function detectCDP(): string[] {
-  const signals: string[] = [];
-
-  // 1. navigator.webdriver — standard automation flag
+/** Check for navigator.webdriver flag */
+function checkWebdriver(): string | null {
   try {
-    if ((navigator as unknown as Record<string, unknown>).webdriver === true) {
-      signals.push('cdp:webdriver');
-    }
+    if ((navigator as unknown as Record<string, unknown>).webdriver === true)
+      return 'cdp:webdriver';
   } catch {
     /* ignore */
   }
+  return null;
+}
 
-  // 2. ChromeDriver globals — cdc_ prefixed properties on document
+/** Check for ChromeDriver globals (cdc_ prefixed properties) */
+function checkCdcGlobals(): string | null {
   try {
     for (const key of Object.getOwnPropertyNames(document)) {
-      if (/^(\$)?cdc_/.test(key)) {
-        signals.push('cdp:cdc_global');
-        break;
-      }
+      if (/^(\$)?cdc_/.test(key)) return 'cdp:cdc_global';
     }
   } catch {
     /* ignore */
   }
+  return null;
+}
 
-  // 3. Playwright / Puppeteer / PhantomJS / Nightmare / Selenium globals
-  const globalChecks: [string, () => unknown][] = [
-    ['playwright', () => (window as unknown as Record<string, unknown>).__playwright],
-    ['puppeteer', () => (window as unknown as Record<string, unknown>).__puppeteer],
-    ['phantom', () => (window as unknown as Record<string, unknown>)._phantom],
-    ['nightmare', () => (window as unknown as Record<string, unknown>).__nightmare],
-    ['callPhantom', () => (window as unknown as Record<string, unknown>).callPhantom],
-    [
-      'selenium_unwrapped',
-      () => (document as unknown as Record<string, unknown>).__selenium_unwrapped,
-    ],
-    [
-      'webdriver_evaluate',
-      () => (document as unknown as Record<string, unknown>).__webdriver_evaluate,
-    ],
-    ['driver_evaluate', () => (document as unknown as Record<string, unknown>).__driver_evaluate],
-  ];
-  // Also check __pw_* pattern (Playwright internal bindings)
+/** Check for Playwright __pw_* bindings */
+function checkPwBindings(): string | null {
   try {
     for (const key of Object.getOwnPropertyNames(window)) {
-      if (/^__pw_/.test(key)) {
-        signals.push('cdp:pw_binding');
-        break;
-      }
+      if (/^__pw_/.test(key)) return 'cdp:pw_binding';
     }
   } catch {
     /* ignore */
   }
+  return null;
+}
 
-  for (const [name, getFn] of globalChecks) {
-    try {
-      if (getFn() != null) {
-        signals.push(`cdp:${name}`);
-      }
-    } catch {
-      /* ignore */
-    }
-  }
-
-  // 4. Phantom iframe comparison — stealth plugin detection
-  // Stealth JS plugins patch navigator.webdriver on the main frame only.
-  // An iframe in a closed shadow DOM won't get those patches.
+/** Check for phantom iframe webdriver mismatch (stealth plugin detection) */
+function checkPhantomMismatch(): string | null {
   try {
     const mainWebdriver = (navigator as unknown as Record<string, unknown>).webdriver;
     const phantom = getPhantomWindow();
-    if (phantom) {
-      const iframeWebdriver = (phantom.navigator as unknown as Record<string, unknown>).webdriver;
-      // Main says undefined/false but iframe says true → JS-level spoofing
-      if (!mainWebdriver && iframeWebdriver === true) {
-        signals.push('cdp:phantom_mismatch');
-      }
-    }
+    if (!phantom) return null;
+    const iframeWebdriver = (phantom.navigator as unknown as Record<string, unknown>).webdriver;
+    if (!mainWebdriver && iframeWebdriver === true) return 'cdp:phantom_mismatch';
   } catch {
     /* ignore */
   }
+  return null;
+}
 
-  // 5. WebGL renderer — SwiftShader indicates headless Chrome
+/** Check WebGL renderer for SwiftShader (headless Chrome indicator) */
+function checkSwiftShader(): string | null {
   try {
     const canvas = document.createElement('canvas');
     const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
@@ -397,13 +374,54 @@ export function detectCDP(): string[] {
       const dbg = gl.getExtension('WEBGL_debug_renderer_info');
       if (dbg) {
         const renderer = gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) as string;
-        if (/swiftshader/i.test(renderer)) {
-          signals.push('cdp:swiftshader');
-        }
+        if (/swiftshader/i.test(renderer)) return 'cdp:swiftshader';
       }
     }
   } catch {
     /* ignore */
+  }
+  return null;
+}
+
+// Automation framework globals to check
+const AUTOMATION_GLOBALS: [string, () => unknown][] = [
+  ['playwright', () => (window as unknown as Record<string, unknown>).__playwright],
+  ['puppeteer', () => (window as unknown as Record<string, unknown>).__puppeteer],
+  ['phantom', () => (window as unknown as Record<string, unknown>)._phantom],
+  ['nightmare', () => (window as unknown as Record<string, unknown>).__nightmare],
+  ['callPhantom', () => (window as unknown as Record<string, unknown>).callPhantom],
+  [
+    'selenium_unwrapped',
+    () => (document as unknown as Record<string, unknown>).__selenium_unwrapped,
+  ],
+  [
+    'webdriver_evaluate',
+    () => (document as unknown as Record<string, unknown>).__webdriver_evaluate,
+  ],
+  ['driver_evaluate', () => (document as unknown as Record<string, unknown>).__driver_evaluate],
+];
+
+/** Detect CDP usage, automation globals, and headless artifacts. */
+export function detectCDP(): string[] {
+  const signals: string[] = [];
+
+  for (const check of [
+    checkWebdriver,
+    checkCdcGlobals,
+    checkPwBindings,
+    checkPhantomMismatch,
+    checkSwiftShader,
+  ]) {
+    const s = check();
+    if (s) signals.push(s);
+  }
+
+  for (const [name, getFn] of AUTOMATION_GLOBALS) {
+    try {
+      if (getFn() != null) signals.push(`cdp:${name}`);
+    } catch {
+      /* ignore */
+    }
   }
 
   return signals;
@@ -425,6 +443,7 @@ export function normalizeStrokes(
       width: p.width,
       height: p.height,
       coalescedCount: p.coalescedCount,
+      coalescedSpoofed: p.coalescedSpoofed,
     })),
     startTime: s.startTime - startTime,
     endTime: s.endTime - startTime,

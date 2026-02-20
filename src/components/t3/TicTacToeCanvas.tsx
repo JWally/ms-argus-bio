@@ -1,6 +1,7 @@
 import { forwardRef, useRef, useImperativeHandle, useEffect, useCallback } from 'react';
 import type { Board, WinLine, GamePhase, Player } from '../../game/t3-types';
 import type { Stroke, StrokePoint } from '../DrawingCanvas';
+import { isCoalescedSpoofed } from '../../utils/pointer-utils';
 
 /** Internal resolution of the canvas: 3 cells x CELL_SIZE */
 const CELL_SIZE = 140;
@@ -504,6 +505,7 @@ const TicTacToeCanvas = forwardRef<T3CanvasHandle, Props>(
           width: e.width,
           height: e.height,
           coalescedCount: 0,
+          coalescedSpoofed: false,
         };
 
         // Cancel any active dissolve — user is drawing again
@@ -573,6 +575,7 @@ const TicTacToeCanvas = forwardRef<T3CanvasHandle, Props>(
           width: e.width,
           height: e.height,
           coalescedCount: coalesced.length,
+          coalescedSpoofed: isCoalescedSpoofed(coalesced),
         });
         render();
       },

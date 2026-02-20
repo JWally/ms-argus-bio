@@ -3,6 +3,7 @@
 // Flow: JSON → deflateRaw → ECDH+HKDF(date) AES-256-GCM encrypt → [iv(12) | ciphertext+tag]
 
 import { deflateRaw } from 'pako';
+import { sboxReverse } from './sbox';
 
 /** Length of a base64-encoded raw P-256 public key (65 bytes → 88 chars) */
 const SERVER_KEY_LEN = 88;
@@ -139,7 +140,9 @@ export async function decryptChallengeResponse(
   const aesKey = await deriveAesKey(clientPrivateKey, serverPubKey, ['decrypt']);
   const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, aesKey, ciphertextWithTag);
 
-  return JSON.parse(new TextDecoder().decode(decrypted));
+  // Reverse the S-box obfuscation layer applied by the server before AES encryption
+  const reversed = sboxReverse(new Uint8Array(decrypted));
+  return JSON.parse(new TextDecoder().decode(reversed));
 }
 
 /** Convert Uint8Array → base64 (chunked to avoid stack overflow) */
