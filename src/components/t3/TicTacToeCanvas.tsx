@@ -506,6 +506,10 @@ const TicTacToeCanvas = forwardRef<T3CanvasHandle, Props>(
           height: e.height,
           coalescedCount: 0,
           coalescedSpoofed: false,
+          movementX: 0,
+          movementY: 0,
+          predictedCount: 0,
+          timestampDelta: performance.now() - e.timeStamp,
         };
 
         // Cancel any active dissolve — user is drawing again
@@ -576,6 +580,10 @@ const TicTacToeCanvas = forwardRef<T3CanvasHandle, Props>(
           height: e.height,
           coalescedCount: coalesced.length,
           coalescedSpoofed: isCoalescedSpoofed(coalesced),
+          movementX: e.movementX,
+          movementY: e.movementY,
+          predictedCount: (e.nativeEvent as PointerEvent).getPredictedEvents?.()?.length ?? 0,
+          timestampDelta: performance.now() - e.timeStamp,
         });
         render();
       },

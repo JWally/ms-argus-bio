@@ -4,7 +4,7 @@
 import type { BiometricPayload, NormalizedStroke } from './types';
 import { timingCV } from './heuristics';
 
-const EMBEDDING_DIMS = 70;
+const EMBEDDING_DIMS = 73;
 
 /** Clamp value to [0, 1] after min-max normalization */
 function norm(value: number, min: number, max: number): number {
@@ -352,6 +352,22 @@ export function encode(payload: BiometricPayload): number[] {
   // Bots from single distribution → CV < 0.2.
   vec.push(norm(f.interStrokePauseCV ?? 0, 0, 3));
 
+  // ── Dim 70: Zero movement ratio (1d) ──
+  // Fraction of move points where movementX and movementY are both 0.
+  // CDP-dispatched events never synthesize movementX/Y → ratio ~1.0.
+  // Real browsers → ratio ~0.0.
+  vec.push(norm(f.zeroMovementRatio ?? 0, 0, 1));
+
+  // ── Dim 71: Average predicted event count (1d) ──
+  // Average number of predicted events from getPredictedEvents().
+  // Real browsers predict 1-3 events ahead. CDP: always 0.
+  vec.push(norm(f.avgPredictedCount ?? 0, 0, 5));
+
+  // ── Dim 72: Average timestamp delta (1d) ──
+  // Average (performance.now() - event.timeStamp) in ms.
+  // Real browsers: 4-16ms. CDP synthetic events: ~0ms.
+  vec.push(norm(f.avgTimestampDelta ?? 0, 0, 30));
+
   // Sanity check
   if (vec.length !== EMBEDDING_DIMS) {
     throw new Error(`Embedding dimension mismatch: expected ${EMBEDDING_DIMS}, got ${vec.length}`);
@@ -360,5 +376,5 @@ export function encode(payload: BiometricPayload): number[] {
   return vec;
 }
 
-export const EMBEDDING_VERSION = 'v5';
+export const EMBEDDING_VERSION = 'v6';
 export { EMBEDDING_DIMS };

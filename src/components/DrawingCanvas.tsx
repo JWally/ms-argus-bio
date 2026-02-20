@@ -15,6 +15,14 @@ export interface StrokePoint {
   coalescedCount: number;
   /** True if coalesced events appear spoofed (identical refs/coords/timestamps) */
   coalescedSpoofed: boolean;
+  /** PointerEvent.movementX — CDP dispatched events always report 0 */
+  movementX: number;
+  /** PointerEvent.movementY — CDP dispatched events always report 0 */
+  movementY: number;
+  /** Number of predicted events from getPredictedEvents(). Real browsers: 1-3, CDP: 0 */
+  predictedCount: number;
+  /** Delta between performance.now() and event.timeStamp. Real: 4-16ms, CDP: ~0ms */
+  timestampDelta: number;
 }
 
 export interface Stroke {
@@ -106,6 +114,10 @@ const DrawingCanvas = forwardRef<CanvasHandle, Props>(({ disabled }, ref) => {
         height: e.height,
         coalescedCount: 0, // pointerdown is always a single event
         coalescedSpoofed: false,
+        movementX: 0,
+        movementY: 0,
+        predictedCount: 0,
+        timestampDelta: performance.now() - e.timeStamp,
       };
       currentStrokeRef.current = {
         points: [point],
@@ -136,6 +148,10 @@ const DrawingCanvas = forwardRef<CanvasHandle, Props>(({ disabled }, ref) => {
         height: e.height,
         coalescedCount: coalesced.length,
         coalescedSpoofed: isCoalescedSpoofed(coalesced),
+        movementX: e.movementX,
+        movementY: e.movementY,
+        predictedCount: (e.nativeEvent as PointerEvent).getPredictedEvents?.()?.length ?? 0,
+        timestampDelta: performance.now() - e.timeStamp,
       };
       currentStrokeRef.current.points.push(point);
       currentStrokeRef.current.endTime = point.t;

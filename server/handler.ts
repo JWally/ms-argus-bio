@@ -23,7 +23,7 @@ import { sboxApply } from './sbox';
 const logger = new Logger();
 const metrics = new Metrics();
 
-const COLLECTION_NAME = 'bio-handwriting';
+const COLLECTION_NAME = `bio-handwriting-${EMBEDDING_VERSION}`;
 const INTERNAL_ERROR = { error: 'Internal server error' };
 const INVALID_JSON = { error: 'Invalid JSON' };
 const INVALID_API_KEY = { error: 'Invalid API key' };

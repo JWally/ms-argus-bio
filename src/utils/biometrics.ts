@@ -12,6 +12,10 @@ export interface NormalizedStroke {
     height: number;
     coalescedCount: number;
     coalescedSpoofed: boolean;
+    movementX: number;
+    movementY: number;
+    predictedCount: number;
+    timestampDelta: number;
   }[];
   startTime: number;
   endTime: number;
@@ -175,6 +179,9 @@ const EMPTY_FEATURES = {
   velocityBellScore: 0,
   interStrokePauseCV: 0,
   coalescedSupported: COALESCED_SUPPORTED,
+  zeroMovementRatio: 0,
+  avgPredictedCount: 0,
+  avgTimestampDelta: 0,
 };
 
 export function computeFeatures(strokes: Stroke[]) {
@@ -199,6 +206,22 @@ export function computeFeatures(strokes: Stroke[]) {
   const gapStddev = Math.sqrt(variance(strokeGaps));
   const interStrokePauseCV = gapAvg > 0 ? gapStddev / gapAvg : 0;
 
+  // CDP kill signals: movementX/Y, getPredictedEvents, timeStamp delta
+  const movePoints = allPoints.slice(1); // skip pointerdown
+  // zeroMovementRatio: % of move points where coords changed but both movementX/Y are 0
+  // Real browser: ~0%. CDP dispatched events: ~100% (movementX/Y not synthesized).
+  let zeroMovementCount = 0;
+  for (const p of movePoints) {
+    if (p.movementX === 0 && p.movementY === 0) zeroMovementCount++;
+  }
+  const zeroMovementRatio = movePoints.length > 0 ? zeroMovementCount / movePoints.length : 0;
+
+  // avgPredictedCount: avg of predictedCount across move points. Real: 1-3. CDP: 0.
+  const avgPredictedCount = avg(movePoints.map((p) => p.predictedCount));
+
+  // avgTimestampDelta: avg (performance.now() - event.timeStamp). Real: 4-16ms. CDP: ~0ms.
+  const avgTimestampDelta = avg(allPoints.map((p) => p.timestampDelta));
+
   return {
     strokeCount: strokes.length,
     totalPoints: allPoints.length,
@@ -218,6 +241,9 @@ export function computeFeatures(strokes: Stroke[]) {
     velocityBellScore: computeVelocityBellScore(strokes),
     interStrokePauseCV,
     coalescedSupported: COALESCED_SUPPORTED,
+    zeroMovementRatio,
+    avgPredictedCount,
+    avgTimestampDelta,
   };
 }
 
@@ -227,6 +253,7 @@ export function computeFeatures(strokes: Stroke[]) {
 // If any are tampered with (toString, descriptor, etc.), flag it.
 
 const NATIVE_RE = /\{\s*\[native code\]\s*\}/;
+const HIDDEN_IFRAME_CSS = 'display:none;width:0;height:0;border:none';
 
 function isNative(fn: unknown): boolean {
   if (typeof fn !== 'function') return false;
@@ -290,7 +317,76 @@ export function detectTampering(): string[] {
     tampered.push('Function.prototype.toString');
   }
 
+  // Cross-realm toString check (PHANTOM_DARKNESS)
+  tampered.push(...detectCrossRealmTampering(checks));
+
   return tampered;
+}
+
+/** Cross-realm toString: compare main-frame toString against a clean copy from
+ *  a double-nested iframe. Bot's addInitScript patches main frame but not dynamic iframes. */
+function detectCrossRealmTampering(checks: [string, () => unknown][]): string[] {
+  const signals: string[] = [];
+  const cleanToString = getCrossRealmToString();
+  if (!cleanToString) return signals;
+
+  for (const [name, getFn] of checks) {
+    try {
+      const fn = getFn();
+      if (typeof fn !== 'function') continue;
+      const mainResult = Function.prototype.toString.call(fn);
+      const crossResult = cleanToString.call(fn);
+      if (NATIVE_RE.test(mainResult) && !NATIVE_RE.test(crossResult)) {
+        signals.push(`xrealm:${name}`);
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  return signals;
+}
+
+/** Get a clean Function.prototype.toString from a double-nested iframe chain.
+ *  Bot's addInitScript patches the main frame but not dynamically created iframes. */
+function getCrossRealmToString(): typeof Function.prototype.toString | null {
+  try {
+    // Create first iframe
+    const host1 = document.createElement('div');
+    const shadow1 = host1.attachShadow({ mode: 'closed' });
+    const iframe1 = document.createElement('iframe');
+    iframe1.style.cssText = HIDDEN_IFRAME_CSS;
+    shadow1.appendChild(iframe1);
+    document.body.appendChild(host1);
+    const win1 = iframe1.contentWindow;
+    if (!win1) {
+      host1.remove();
+      return null;
+    }
+
+    // Create second iframe inside the first (double-nested)
+    const doc1 = win1.document;
+    const iframe2 = doc1.createElement('iframe');
+    iframe2.style.cssText = HIDDEN_IFRAME_CSS;
+    doc1.body.appendChild(iframe2);
+    const win2 = iframe2.contentWindow;
+    if (!win2) {
+      host1.remove();
+      return null;
+    }
+
+    // Capture the clean toString from the innermost iframe
+    const cleanToString = (
+      win2 as unknown as {
+        Function: { prototype: { toString: typeof Function.prototype.toString } };
+      }
+    ).Function.prototype.toString;
+
+    // Clean up after capturing
+    setTimeout(() => host1.remove(), 0);
+    return cleanToString;
+  } catch {
+    return null;
+  }
 }
 
 // ── CDP / Automation detection ──────────────────────────────────────
@@ -304,7 +400,7 @@ function getPhantomWindow(): Window | null {
     const host = document.createElement('div');
     const shadow = host.attachShadow({ mode: 'closed' });
     const iframe = document.createElement('iframe');
-    iframe.style.cssText = 'display:none;width:0;height:0;border:none';
+    iframe.style.cssText = HIDDEN_IFRAME_CSS;
     shadow.appendChild(iframe);
     document.body.appendChild(host);
     const win = iframe.contentWindow;
@@ -424,7 +520,34 @@ export function detectCDP(): string[] {
     }
   }
 
+  // Client litter detection: compare window globals against a fresh iframe
+  // to find bot-injected globals (e.g. __decryptedChallenge, __nextFlash)
+  const litter = checkClientLitter();
+  if (litter.length > 0) {
+    const top5 = litter.slice(0, 5).join(',');
+    signals.push(`cdp:litter(${top5})`);
+  }
+
   return signals;
+}
+
+/** Known bot-injected globals — only these trigger litter detection.
+ *  Whitelist approach: browser extensions inject too many random globals
+ *  to reliably blacklist, so we only flag patterns seen in actual bots. */
+const BOT_LITTER_RE =
+  /^(__decryptedChallenge|__nextFlash|__captcha|__solver|__bot|__scrape|__crawl|__auto|__inject|__hook|__intercept|__proxy|__bypass|__patch|puppeteer_|playwright_|selenium_|webdriver_|cdc_|_phantom$|callPhantom$)/;
+
+/** Check window globals for known bot-injected patterns. */
+function checkClientLitter(): string[] {
+  try {
+    const matches: string[] = [];
+    for (const key of Object.getOwnPropertyNames(window)) {
+      if (BOT_LITTER_RE.test(key)) matches.push(key);
+    }
+    return matches;
+  } catch {
+    return [];
+  }
 }
 
 export function normalizeStrokes(
@@ -444,6 +567,10 @@ export function normalizeStrokes(
       height: p.height,
       coalescedCount: p.coalescedCount,
       coalescedSpoofed: p.coalescedSpoofed,
+      movementX: p.movementX,
+      movementY: p.movementY,
+      predictedCount: p.predictedCount,
+      timestampDelta: p.timestampDelta,
     })),
     startTime: s.startTime - startTime,
     endTime: s.endTime - startTime,

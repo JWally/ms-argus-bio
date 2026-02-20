@@ -42,6 +42,10 @@ export interface NormalizedStroke {
     height: number;
     coalescedCount: number;
     coalescedSpoofed?: boolean;
+    movementX?: number;
+    movementY?: number;
+    predictedCount?: number;
+    timestampDelta?: number;
   }[];
   startTime: number;
   endTime: number;
@@ -77,6 +81,12 @@ export interface AggregateFeatures {
   interStrokePauseCV: number;
   /** Whether the browser natively supports getCoalescedEvents (Safari doesn't) */
   coalescedSupported?: boolean;
+  /** Ratio of move points where coords changed but both movementX and movementY are 0 */
+  zeroMovementRatio?: number;
+  /** Average predicted event count from getPredictedEvents(). Real: 1-3, CDP: 0 */
+  avgPredictedCount?: number;
+  /** Average delta between performance.now() and event.timeStamp. Real: 4-16ms, CDP: ~0ms */
+  avgTimestampDelta?: number;
 }
 
 export type Label = 'human' | 'bot' | 'uncertain';

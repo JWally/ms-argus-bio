@@ -214,11 +214,11 @@ describe('encode', () => {
 });
 
 describe('constants', () => {
-  it('EMBEDDING_DIMS is 70', () => {
-    expect(EMBEDDING_DIMS).toBe(70);
+  it('EMBEDDING_DIMS is 73', () => {
+    expect(EMBEDDING_DIMS).toBe(73);
   });
 
-  it('EMBEDDING_VERSION is defined', () => {
-    expect(EMBEDDING_VERSION).toBe('v5');
+  it('EMBEDDING_VERSION is v6', () => {
+    expect(EMBEDDING_VERSION).toBe('v6');
   });
 });

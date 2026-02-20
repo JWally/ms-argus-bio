@@ -79,7 +79,7 @@ function getBotReason(payload: BiometricPayload): string | null {
   // Using === true so missing/undefined field (old client JS) is also skipped.
   if (f.coalescedSupported === true && f.coalescedRatio === 0 && f.totalPoints > 20)
     return 'no-coalesced';
-  if ((f.coalescedSpoofedRatio ?? 0) > 0)
+  if ((f.coalescedSpoofedRatio ?? 0) > 0.1 && f.totalPoints > 20)
     return `coalesced-spoofed:${((f.coalescedSpoofedRatio ?? 0) * 100).toFixed(1)}%`;
   // Touch/pen with zero pressure variance = synthetic events, BUT only
   // when the browser actually reports non-zero pressure. iOS Safari reports
@@ -93,6 +93,17 @@ function getBotReason(payload: BiometricPayload): string | null {
     f.totalPoints > 20
   )
     return 'zero-pressure-touch';
+
+  // ── CDP kill signals (movementX/Y, predictedEvents, timestampDelta) ──
+  // zeroMovementRatio > 0.8: CDP-dispatched events never synthesize movementX/Y
+  if ((f.zeroMovementRatio ?? -1) > 0.8 && f.totalPoints > 20)
+    return `zeroMovement:${((f.zeroMovementRatio ?? 0) * 100).toFixed(0)}%`;
+  // avgPredictedCount === 0: real browsers always predict 1-3 events
+  if (f.avgPredictedCount !== undefined && f.avgPredictedCount === 0 && f.totalPoints > 30)
+    return 'no-predicted-events';
+  // avgTimestampDelta < 1ms: CDP events have near-zero delta
+  if ((f.avgTimestampDelta ?? 999) < 1 && f.totalPoints > 20)
+    return `timestampDelta:${(f.avgTimestampDelta ?? 0).toFixed(2)}ms`;
 
   // ── rAF cadence analysis ──
   if (f.rafCadenceRatio < 0.35 && f.totalPoints > 20) return `raf:${f.rafCadenceRatio.toFixed(3)}`;

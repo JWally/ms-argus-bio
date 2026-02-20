@@ -37,11 +37,11 @@ vi.mock('./qdrant-client', () => ({
   },
 }));
 
-const mockEncode = vi.fn().mockReturnValue(new Array(70).fill(0.5));
+const mockEncode = vi.fn().mockReturnValue(new Array(73).fill(0.5));
 vi.mock('./embedding', () => ({
   encode: (...args: unknown[]) => mockEncode(...args),
-  EMBEDDING_VERSION: 'v5',
-  EMBEDDING_DIMS: 70,
+  EMBEDDING_VERSION: 'v6',
+  EMBEDDING_DIMS: 73,
 }));
 
 const mockHeuristicLabel = vi.fn().mockReturnValue('human');
@@ -538,6 +538,6 @@ describe('error handling', () => {
       statusCode: number;
     };
     expect(result.statusCode).toBe(500);
-    mockEncode.mockReturnValue(new Array(64).fill(0.5));
+    mockEncode.mockReturnValue(new Array(73).fill(0.5));
   });
 });

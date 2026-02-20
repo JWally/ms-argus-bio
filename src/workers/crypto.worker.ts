@@ -65,14 +65,31 @@ function base64ToUint8(b64: string): Uint8Array {
 
 interface WorkerMessage {
   id: number;
-  type: 'init' | 'decrypt' | 'encrypt';
+  type: 'init' | 'init-port' | 'decrypt' | 'encrypt';
   encryptedB64?: string;
   serverPubKeyB64?: string;
   payload?: object;
+  port?: MessagePort;
 }
 
-self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
-  const { id, type } = e.data;
+// MessagePort for isolated communication — bot's Worker Proxy can't intercept
+let messagePort: MessagePort | null = null;
+
+/** Send response via MessagePort if available, else direct self.postMessage */
+function respond(msg: Record<string, unknown>, transfer?: Transferable[]): void {
+  if (messagePort) {
+    messagePort.postMessage(msg, { transfer });
+  } else if (transfer?.length) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (self.postMessage as any)(msg, transfer);
+  } else {
+    self.postMessage(msg);
+  }
+}
+
+/** Handle incoming messages (from either self.onmessage or messagePort.onmessage) */
+async function handleWorkerMessage(data: WorkerMessage): Promise<void> {
+  const { id, type } = data;
 
   try {
     switch (type) {
@@ -86,13 +103,13 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
 
         const rawPub = await crypto.subtle.exportKey('raw', keyPair.publicKey);
         const rawPublicKey = uint8ToBase64(new Uint8Array(rawPub));
-        self.postMessage({ id, rawPublicKey });
+        respond({ id, rawPublicKey });
         break;
       }
 
       case 'decrypt': {
         if (!privateKey) throw new Error('Worker not initialized');
-        const { encryptedB64, serverPubKeyB64 } = e.data;
+        const { encryptedB64, serverPubKeyB64 } = data;
         if (!encryptedB64 || !serverPubKeyB64) throw new Error('Missing decrypt params');
 
         const packed = base64ToUint8(encryptedB64);
@@ -109,14 +126,14 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
 
         // Reverse S-box obfuscation applied by server before AES encryption
         const reversed = sboxReverse(new Uint8Array(decrypted));
-        const data = JSON.parse(new TextDecoder().decode(reversed));
-        self.postMessage({ id, data });
+        const jsonData = JSON.parse(new TextDecoder().decode(reversed));
+        respond({ id, data: jsonData });
         break;
       }
 
       case 'encrypt': {
         if (!privateKey) throw new Error('Worker not initialized');
-        const { payload, serverPubKeyB64 } = e.data;
+        const { payload, serverPubKeyB64 } = data;
         if (!payload || !serverPubKeyB64) throw new Error('Missing encrypt params');
 
         const json = JSON.stringify(payload);
@@ -138,12 +155,27 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         result.set(ctBytes, 12);
 
         // Transfer the buffer for zero-copy
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (self.postMessage as any)({ id, encrypted: result }, [result.buffer]);
+        respond({ id, encrypted: result }, [result.buffer]);
         break;
       }
     }
   } catch (err) {
-    self.postMessage({ id, error: (err as Error).message });
+    respond({ id, error: (err as Error).message });
   }
+}
+
+self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
+  const { type } = e.data;
+
+  // Handle MessagePort initialization — store the port and attach handler
+  if (type === 'init-port' && e.data.port) {
+    messagePort = e.data.port;
+    messagePort.onmessage = (portEvent: MessageEvent<WorkerMessage>) => {
+      handleWorkerMessage(portEvent.data);
+    };
+    return;
+  }
+
+  // Backwards compat: handle messages directly if no port setup
+  await handleWorkerMessage(e.data);
 };

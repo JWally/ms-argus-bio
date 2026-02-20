@@ -4,6 +4,7 @@
 import { generateKeys, encryptPayload, decryptChallengeResponse, type CryptoKeys } from './crypto';
 
 let worker: Worker | null = null;
+let port: MessagePort | null = null;
 let msgId = 0;
 const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
 
@@ -18,7 +19,8 @@ function postAndWait<T>(msg: Record<string, unknown>): Promise<T> {
       resolve: resolve as (v: unknown) => void,
       reject,
     });
-    worker!.postMessage({ ...msg, id });
+    // Route through MessageChannel port if available, else direct Worker
+    (port ?? worker!).postMessage({ ...msg, id });
   });
 }
 
@@ -42,12 +44,19 @@ export async function initCrypto(): Promise<{ rawPublicKey: string; usingWorker:
     worker = new Worker(new URL('../workers/crypto.worker.ts', import.meta.url), {
       type: 'module',
     });
-    worker.onmessage = handleMessage;
     worker.onerror = () => {
       // Worker failed — fall through to fallback on next call
       worker = null;
+      port = null;
       usingWorker = false;
     };
+
+    // Set up MessageChannel — bot's Worker Proxy only sees the opaque port transfer,
+    // never actual challenge data on the worker.postMessage channel.
+    const channel = new MessageChannel();
+    port = channel.port1;
+    port.onmessage = handleMessage;
+    worker.postMessage({ type: 'init-port', port: channel.port2 }, [channel.port2]);
 
     const result = await postAndWait<{ rawPublicKey: string }>({ type: 'init' });
     usingWorker = true;
@@ -55,6 +64,7 @@ export async function initCrypto(): Promise<{ rawPublicKey: string; usingWorker:
   } catch {
     // Worker failed to load — fall back to main thread
     worker = null;
+    port = null;
     usingWorker = false;
     fallbackKeys = await generateKeys();
     return { rawPublicKey: fallbackKeys.rawPublicKey, usingWorker: false };

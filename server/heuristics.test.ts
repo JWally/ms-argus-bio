@@ -111,6 +111,50 @@ describe('heuristicLabel', () => {
       );
       expect(result.label).not.toBe('bot');
     });
+
+    it('flags zeroMovementRatio > 0.8 as bot (CDP kill shot)', () => {
+      const result = heuristicLabel(
+        makePayload({ features: { zeroMovementRatio: 0.95, totalPoints: 50 } })
+      );
+      expect(result.label).toBe('bot');
+      expect(result.reason).toMatch(/^zeroMovement:/);
+    });
+
+    it('does NOT flag zeroMovementRatio with few points', () => {
+      const result = heuristicLabel(
+        makePayload({ features: { zeroMovementRatio: 0.95, totalPoints: 15 } })
+      );
+      expect(result.label).not.toBe('bot');
+    });
+
+    it('flags avgPredictedCount === 0 with 30+ points as bot', () => {
+      const result = heuristicLabel(
+        makePayload({ features: { avgPredictedCount: 0, totalPoints: 50 } })
+      );
+      expect(result.label).toBe('bot');
+      expect(result.reason).toBe('no-predicted-events');
+    });
+
+    it('does NOT flag avgPredictedCount === 0 with few points', () => {
+      const result = heuristicLabel(
+        makePayload({ features: { avgPredictedCount: 0, totalPoints: 20 } })
+      );
+      expect(result.reason).not.toBe('no-predicted-events');
+    });
+
+    it('flags avgTimestampDelta < 1ms as bot', () => {
+      const result = heuristicLabel(
+        makePayload({ features: { avgTimestampDelta: 0.3, totalPoints: 50 } })
+      );
+      expect(result.label).toBe('bot');
+      expect(result.reason).toMatch(/^timestampDelta:/);
+    });
+
+    it('does NOT flag avgTimestampDelta when field is missing (old client)', () => {
+      // Old clients don't send these fields — defaults must not trigger
+      const result = heuristicLabel(makePayload({ features: { totalPoints: 50 } }));
+      expect(result.reason).not.toMatch(/zeroMovement|no-predicted|timestampDelta/);
+    });
   });
 
   describe('human signals', () => {
