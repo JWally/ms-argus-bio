@@ -188,8 +188,23 @@ export class BioStack extends Stack {
     // LAMBDA FUNCTION
     // =========================================================================
 
+    const serverModelDir = path.join(__dirname, '../../../server/model');
+    const vectorConfig = createVectorLambdaConfig();
+
     const classifyFn = new lambda.NodejsFunction(this, 'ClassifyHandler', {
-      ...createVectorLambdaConfig(),
+      ...vectorConfig,
+      bundling: {
+        ...vectorConfig.bundling,
+        commandHooks: {
+          beforeBundling: () => [],
+          beforeInstall: () => [],
+          afterBundling: (_inputDir: string, outputDir: string) => [
+            `mkdir -p ${outputDir}/model`,
+            `cp ${serverModelDir}/weights.bin ${outputDir}/model/weights.bin`,
+            `test -f ${serverModelDir}/config.json && cp ${serverModelDir}/config.json ${outputDir}/model/config.json || true`,
+          ],
+        },
+      },
       entry: path.join(__dirname, '../../../server/handler.ts'),
       handler: 'handler',
       functionName: `${stackName}-classify`,

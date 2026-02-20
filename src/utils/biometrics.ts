@@ -285,6 +285,130 @@ export function detectTampering(): string[] {
   return tampered;
 }
 
+// ── CDP / Automation detection ──────────────────────────────────────
+// Detects Chrome DevTools Protocol usage, browser automation frameworks,
+// and headless browser artifacts. Returns prefixed identifiers that merge
+// into the existing tamperedApis instant-kill path.
+
+/** Create a hidden iframe inside a closed shadow DOM and return its window. */
+function getPhantomWindow(): Window | null {
+  try {
+    const host = document.createElement('div');
+    const shadow = host.attachShadow({ mode: 'closed' });
+    const iframe = document.createElement('iframe');
+    iframe.style.cssText = 'display:none;width:0;height:0;border:none';
+    shadow.appendChild(iframe);
+    document.body.appendChild(host);
+    const win = iframe.contentWindow;
+    // Clean up after a tick so the iframe has time to initialize
+    setTimeout(() => host.remove(), 0);
+    return win;
+  } catch {
+    return null;
+  }
+}
+
+/** Detect CDP usage, automation globals, and headless artifacts. */
+export function detectCDP(): string[] {
+  const signals: string[] = [];
+
+  // 1. navigator.webdriver — standard automation flag
+  try {
+    if ((navigator as unknown as Record<string, unknown>).webdriver === true) {
+      signals.push('cdp:webdriver');
+    }
+  } catch {
+    /* ignore */
+  }
+
+  // 2. ChromeDriver globals — cdc_ prefixed properties on document
+  try {
+    for (const key of Object.getOwnPropertyNames(document)) {
+      if (/^(\$)?cdc_/.test(key)) {
+        signals.push('cdp:cdc_global');
+        break;
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+
+  // 3. Playwright / Puppeteer / PhantomJS / Nightmare / Selenium globals
+  const globalChecks: [string, () => unknown][] = [
+    ['playwright', () => (window as unknown as Record<string, unknown>).__playwright],
+    ['puppeteer', () => (window as unknown as Record<string, unknown>).__puppeteer],
+    ['phantom', () => (window as unknown as Record<string, unknown>)._phantom],
+    ['nightmare', () => (window as unknown as Record<string, unknown>).__nightmare],
+    ['callPhantom', () => (window as unknown as Record<string, unknown>).callPhantom],
+    [
+      'selenium_unwrapped',
+      () => (document as unknown as Record<string, unknown>).__selenium_unwrapped,
+    ],
+    [
+      'webdriver_evaluate',
+      () => (document as unknown as Record<string, unknown>).__webdriver_evaluate,
+    ],
+    ['driver_evaluate', () => (document as unknown as Record<string, unknown>).__driver_evaluate],
+  ];
+  // Also check __pw_* pattern (Playwright internal bindings)
+  try {
+    for (const key of Object.getOwnPropertyNames(window)) {
+      if (/^__pw_/.test(key)) {
+        signals.push('cdp:pw_binding');
+        break;
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+
+  for (const [name, getFn] of globalChecks) {
+    try {
+      if (getFn() != null) {
+        signals.push(`cdp:${name}`);
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  // 4. Phantom iframe comparison — stealth plugin detection
+  // Stealth JS plugins patch navigator.webdriver on the main frame only.
+  // An iframe in a closed shadow DOM won't get those patches.
+  try {
+    const mainWebdriver = (navigator as unknown as Record<string, unknown>).webdriver;
+    const phantom = getPhantomWindow();
+    if (phantom) {
+      const iframeWebdriver = (phantom.navigator as unknown as Record<string, unknown>).webdriver;
+      // Main says undefined/false but iframe says true → JS-level spoofing
+      if (!mainWebdriver && iframeWebdriver === true) {
+        signals.push('cdp:phantom_mismatch');
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+
+  // 5. WebGL renderer — SwiftShader indicates headless Chrome
+  try {
+    const canvas = document.createElement('canvas');
+    const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+    if (gl && gl instanceof WebGLRenderingContext) {
+      const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+      if (dbg) {
+        const renderer = gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) as string;
+        if (/swiftshader/i.test(renderer)) {
+          signals.push('cdp:swiftshader');
+        }
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+
+  return signals;
+}
+
 export function normalizeStrokes(
   strokes: Stroke[],
   startTime: number,

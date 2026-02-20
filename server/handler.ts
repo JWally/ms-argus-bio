@@ -16,6 +16,7 @@ import { createSession, getSession, completeSession } from './sessions';
 import { createToken, redeemToken } from './tokens';
 import type { BiometricPayload, Verdict, ClassifyResponse, Merchant } from './types';
 import { GLYPH_MASKS, MASK_WIDTH, MASK_HEIGHT } from './glyph-masks';
+import { inferLetter } from './inference';
 
 const logger = new Logger();
 const metrics = new Metrics();
@@ -199,7 +200,8 @@ const HKDF_INFO = new TextEncoder().encode('argus-bio-v1');
 async function deriveAesKeyServer(
   serverPrivKeyPkcs8: string,
   clientPubKeyRaw: string,
-  dateSalt: string
+  dateSalt: string,
+  usages: KeyUsage[] = ['decrypt']
 ) {
   // Import server private key (PKCS8 base64)
   const privBytes = Buffer.from(serverPrivKeyPkcs8, 'base64');
@@ -236,8 +238,26 @@ async function deriveAesKeyServer(
     hkdfKey,
     { name: 'AES-GCM', length: 256 },
     false,
-    ['decrypt']
+    usages
   );
+}
+
+/** Encrypt an object as AES-256-GCM using the ECDH shared secret.
+ *  Returns base64 string of [iv(12) | ciphertext+tag]. */
+async function encryptForClient(
+  data: object,
+  serverPrivKey: string,
+  clientPubKey: string
+): Promise<string> {
+  const today = new Date().toISOString().slice(0, 10);
+  const aesKey = await deriveAesKeyServer(serverPrivKey, clientPubKey, today, ['encrypt']);
+
+  const plaintext = new TextEncoder().encode(JSON.stringify(data));
+  const iv = randomBytes(12);
+  const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, aesKey, plaintext);
+
+  const ct = Buffer.from(ciphertext);
+  return Buffer.concat([iv, ct]).toString('base64');
 }
 
 /** Decrypt an encrypted biometric payload (octet-stream body).
@@ -450,21 +470,35 @@ async function handleChallenge(event: APIGatewayProxyEventV2): Promise<APIGatewa
   const glyphs = mode === 't3' ? generateT3Challenge() : generateServerChallenge();
   let challengeId = encryptChallenge(glyphs, Date.now(), mode);
 
-  // ECDH key exchange: if client sent its public key, append server's public key to challengeId.
-  // Client's raw public key arrives disguised as a canvas fingerprint header.
-  const clientPubKey = event.headers?.['x-canvas-fp'];
-  if (clientPubKey) {
-    const ecdhKeys = await loadEcdhKeyPair();
-    if (ecdhKeys) {
-      challengeId += ecdhKeys.current.rawPublicKey;
-    }
-  }
-
   // Send masks (with noise) instead of glyph characters.
   // The client never sees char or modelIndex — only the server can decrypt challengeId.
   const masks = glyphs.map((g) => noisifyMask(GLYPH_MASKS[g.char]));
   const types = glyphs.map((g) => g.type);
 
+  // ECDH key exchange: if client sent its public key, append server's public key to challengeId
+  // and encrypt the mask data so bots can't sniff bitmaps off the wire.
+  const clientPubKey = event.headers?.['x-canvas-fp'];
+  if (clientPubKey) {
+    const ecdhKeys = await loadEcdhKeyPair();
+    if (ecdhKeys) {
+      challengeId += ecdhKeys.current.rawPublicKey;
+
+      try {
+        // Encrypt masks + types with ECDH shared secret
+        const enc = await encryptForClient(
+          { masks, types, maskWidth: MASK_WIDTH, maskHeight: MASK_HEIGHT },
+          ecdhKeys.current.privateKey,
+          clientPubKey
+        );
+        return jsonResponse(200, { challengeId, enc });
+      } catch (err) {
+        logger.warn('Challenge encryption failed, falling back to plaintext', { error: err });
+        // Fall through to plaintext response
+      }
+    }
+  }
+
+  // Fallback: no ECDH — send plaintext (local dev / key load failure)
   return jsonResponse(200, {
     challengeId,
     masks,
@@ -474,6 +508,9 @@ async function handleChallenge(event: APIGatewayProxyEventV2): Promise<APIGatewa
   });
 }
 
+/** Server-side inference: accept if expected letter is in model's top K predictions. */
+const T3_TOP_K = 5;
+
 /** Validate challenge answers against server-side ground truth.
  *  Returns null if valid, or a retry response if mismatched. */
 function validateChallengeAnswers(payload: BiometricPayload): APIGatewayProxyResultV2 | null {
@@ -482,7 +519,6 @@ function validateChallengeAnswers(payload: BiometricPayload): APIGatewayProxyRes
 
   const { glyphs: expected, mode } = decrypted;
   const isT3 = mode === 't3';
-  const T3_TOP_K = 5;
   const mismatches: string[] = [];
   const checkLen = Math.min(expected.length, payload.digits.length);
 
@@ -493,15 +529,25 @@ function validateChallengeAnswers(payload: BiometricPayload): APIGatewayProxyRes
       mismatches.push(`glyph[${i}]: missing`);
       continue;
     }
-    if (isT3 && digit.allConfidences) {
-      // T3: accept if expected letter is in model's top K predictions
-      const indexed = digit.allConfidences.map((c, idx) => ({ idx, c }));
+    if (isT3) {
+      // Server-side inference: run the EMNIST model on the image data
+      // instead of trusting client-reported allConfidences.
+      if (!digit.imageData || digit.imageData.length !== 784) {
+        mismatches.push(`glyph[${i}]: missing or invalid imageData`);
+        continue;
+      }
+      const result = inferLetter(digit.imageData);
+      const serverConf = result.allConfidences[exp.modelIndex] ?? 0;
+
+      // Accept if expected letter is in model's top K predictions
+      const indexed = result.allConfidences.map((c, idx) => ({ idx, c }));
       indexed.sort((a, b) => b.c - a.c);
       const topK = indexed.slice(0, T3_TOP_K).map((e) => e.idx);
+
       if (!topK.includes(exp.modelIndex)) {
-        const conf = digit.allConfidences[exp.modelIndex] ?? 0;
+        const serverTop = LETTERS[result.index];
         mismatches.push(
-          `glyph[${i}]: expected ${exp.char} not in top-${T3_TOP_K} (top=${LETTERS[indexed[0].idx]}, conf=${(conf * 100).toFixed(1)}%)`
+          `glyph[${i}]: expected ${exp.char} not in server top-${T3_TOP_K} (top=${serverTop}, conf=${(serverConf * 100).toFixed(1)}%)`
         );
       }
     } else if (digit.recognized !== exp.modelIndex) {

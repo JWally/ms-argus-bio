@@ -9,12 +9,19 @@ import {
   computeFeatures,
   normalizeStrokes,
   detectTampering,
+  detectCDP,
   type DigitResult,
   type ConfidenceSnapshot,
   type VerdictResult,
 } from '../utils/biometrics';
 import { buildClientMask, CLIENT_MASK_WIDTH, CLIENT_MASK_HEIGHT } from '../utils/mask';
-import { generateKeys, extractServerKey, encryptPayload, type CryptoKeys } from '../utils/crypto';
+import {
+  generateKeys,
+  extractServerKey,
+  encryptPayload,
+  decryptChallengeResponse,
+  type CryptoKeys,
+} from '../utils/crypto';
 import '../App.css';
 
 type AppState = 'loading' | 'idle' | 'active' | 'complete';
@@ -155,9 +162,24 @@ export default function CaptchaPage() {
         serverPubKeyRef.current = extracted.serverPubKey;
       }
 
-      setMaskDims({ w: data.maskWidth, h: data.maskHeight });
-      const masks = data.masks as string[];
-      const types = data.types as ('digit' | 'letter')[];
+      // Decrypt encrypted challenge data if present (ECDH-encrypted masks)
+      let masks: string[];
+      let types: ('digit' | 'letter')[];
+      if (data.enc && cryptoKeysRef.current && extracted.serverPubKey) {
+        const decrypted = await decryptChallengeResponse(
+          data.enc as string,
+          cryptoKeysRef.current.privateKey,
+          extracted.serverPubKey
+        );
+        masks = decrypted.masks;
+        types = decrypted.types;
+        setMaskDims({ w: decrypted.maskWidth, h: decrypted.maskHeight });
+      } else {
+        // Fallback: plaintext response (local dev / no ECDH)
+        masks = data.masks as string[];
+        types = data.types as ('digit' | 'letter')[];
+        setMaskDims({ w: data.maskWidth, h: data.maskHeight });
+      }
       return masks.map((mask, i) => ({ type: types[i], mask }));
     } catch {
       return generateFallbackChallenge();
@@ -198,7 +220,7 @@ export default function CaptchaPage() {
       devicePixelRatio: window.devicePixelRatio,
       userAgent: navigator.userAgent,
       features: computeFeatures(allStrokesRef.current),
-      tamperedApis: detectTampering(),
+      tamperedApis: [...detectTampering(), ...detectCDP()],
       ...(sessionIdRef.current ? { sessionId: sessionIdRef.current } : {}),
     };
     // eslint-disable-next-line no-console

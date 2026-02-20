@@ -7,9 +7,21 @@ import GameOverPanel from '../components/t3/GameOverPanel';
 import { checkWinner, getEmptyCells, isDraw, getAIMove, randomLetter } from '../game/t3-engine';
 import type { GameState, GameAction, Board } from '../game/t3-types';
 import type { Stroke } from '../components/DrawingCanvas';
-import { computeFeatures, normalizeStrokes, type VerdictResult } from '../utils/biometrics';
+import {
+  computeFeatures,
+  normalizeStrokes,
+  detectTampering,
+  detectCDP,
+  type VerdictResult,
+} from '../utils/biometrics';
 import { buildClientMask, CLIENT_MASK_WIDTH, CLIENT_MASK_HEIGHT } from '../utils/mask';
-import { generateKeys, extractServerKey, encryptPayload, type CryptoKeys } from '../utils/crypto';
+import {
+  generateKeys,
+  extractServerKey,
+  encryptPayload,
+  decryptChallengeResponse,
+  type CryptoKeys,
+} from '../utils/crypto';
 import { renderTo28x28 } from '../ml/preprocess';
 import { formatTime } from '../components/Leaderboard';
 import '../styles/t3.css';
@@ -290,7 +302,7 @@ function getCellImageData(
   const outData = outCanvas.getContext('2d')!.getImageData(0, 0, 28, 28);
   const result: number[] = [];
   for (let i = 0; i < 784; i++) {
-    result.push(outData.data[i * 4] / 255);
+    result.push(outData.data[i * 4]);
   }
   return result;
 }
@@ -347,6 +359,20 @@ export default function TicTacToePage() {
       const extracted = extractServerKey(data.challengeId as string);
       if (extracted.serverPubKey) {
         serverPubKeyRef.current = extracted.serverPubKey;
+      }
+
+      // Decrypt encrypted challenge data if present (ECDH-encrypted masks)
+      if (data.enc && cryptoKeysRef.current && extracted.serverPubKey) {
+        const decrypted = await decryptChallengeResponse(
+          data.enc as string,
+          cryptoKeysRef.current.privateKey,
+          extracted.serverPubKey
+        );
+        return {
+          id: extracted.challengeId,
+          masks: decrypted.masks,
+          dims: { w: decrypted.maskWidth, h: decrypted.maskHeight },
+        };
       }
 
       return {
@@ -438,6 +464,7 @@ export default function TicTacToePage() {
       devicePixelRatio: window.devicePixelRatio,
       userAgent: navigator.userAgent,
       features: computeFeatures(allStrokes),
+      tamperedApis: [...detectTampering(), ...detectCDP()],
       gameMode: 't3',
     };
 

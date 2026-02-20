@@ -84,7 +84,11 @@ export async function encryptPayload(
 }
 
 /** Derive an AES-256-GCM key from ECDH shared secret + HKDF with today's UTC date as salt */
-async function deriveAesKey(privateKey: CryptoKey, publicKey: CryptoKey): Promise<CryptoKey> {
+async function deriveAesKey(
+  privateKey: CryptoKey,
+  publicKey: CryptoKey,
+  usages: KeyUsage[] = ['encrypt']
+): Promise<CryptoKey> {
   // ECDH → 256-bit shared secret
   const sharedBits = await crypto.subtle.deriveBits(
     { name: 'ECDH', public: publicKey },
@@ -102,8 +106,40 @@ async function deriveAesKey(privateKey: CryptoKey, publicKey: CryptoKey): Promis
     hkdfKey,
     { name: 'AES-GCM', length: 256 },
     false,
-    ['encrypt']
+    usages
   );
+}
+
+/** Decrypt a challenge response encrypted by the server with ECDH shared secret.
+ *  Input: base64 string of [iv(12) | ciphertext+tag]. */
+export async function decryptChallengeResponse(
+  encryptedB64: string,
+  clientPrivateKey: CryptoKey,
+  serverPublicKeyB64: string
+): Promise<{
+  masks: string[];
+  types: ('digit' | 'letter')[];
+  maskWidth: number;
+  maskHeight: number;
+}> {
+  const packed = base64ToUint8(encryptedB64);
+  // .slice() creates fresh ArrayBuffer copies (avoids TS ArrayBufferLike issues with subarray)
+  const iv = packed.slice(0, 12);
+  const ciphertextWithTag = packed.slice(12);
+
+  const serverPubBytes = base64ToUint8(serverPublicKeyB64);
+  const serverPubKey = await crypto.subtle.importKey(
+    'raw',
+    serverPubBytes.buffer as ArrayBuffer,
+    { name: 'ECDH', namedCurve: 'P-256' },
+    false,
+    []
+  );
+
+  const aesKey = await deriveAesKey(clientPrivateKey, serverPubKey, ['decrypt']);
+  const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, aesKey, ciphertextWithTag);
+
+  return JSON.parse(new TextDecoder().decode(decrypted));
 }
 
 /** Convert Uint8Array → base64 (chunked to avoid stack overflow) */
