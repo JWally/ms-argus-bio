@@ -12,7 +12,7 @@ const VERDICT_CONFIG = {
 } as const;
 
 interface Props {
-  winner: Player | 'draw' | null;
+  winner: Player | 'draw' | 'timeout' | null;
   elapsedMs: number;
   verdict: VerdictResult | null;
   onPlayAgain: () => void;
@@ -23,11 +23,18 @@ export default function GameOverPanel({ winner, elapsedMs, verdict, onPlayAgain 
 
   if (!winner) return null;
 
-  const label = winner === 'human' ? 'YOU WIN' : winner === 'ai' ? 'AI WINS' : 'DRAW';
+  const label =
+    winner === 'human'
+      ? 'YOU WIN'
+      : winner === 'timeout'
+        ? "TIME'S UP"
+        : winner === 'ai'
+          ? 'AI WINS'
+          : 'DRAW';
   const className =
     winner === 'human'
       ? 't3-result t3-result-win'
-      : winner === 'ai'
+      : winner === 'ai' || winner === 'timeout'
         ? 't3-result t3-result-lose'
         : 't3-result t3-result-draw';
 
@@ -36,8 +43,8 @@ export default function GameOverPanel({ winner, elapsedMs, verdict, onPlayAgain 
       <div className="t3-result-header">{label}</div>
       <div className="t3-result-time">{formatTime(elapsedMs)}</div>
 
-      {/* Verdict badge */}
-      <VerdictBadge verdict={verdict} />
+      {/* Verdict badge — skip on timeout (no classify was sent) */}
+      {winner !== 'timeout' && <VerdictBadge verdict={verdict} />}
 
       {winner === 'human' ? (
         <InitialsEntry elapsedMs={elapsedMs} onPlayAgain={onPlayAgain} navigate={navigate} />

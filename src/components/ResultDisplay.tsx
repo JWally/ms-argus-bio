@@ -167,27 +167,29 @@ export default function ResultDisplay({ totalTimeMs, timedOut, verdict }: Result
       <div className="result-time">{formatTime(totalTimeMs)}</div>
 
       {/* Verdict badge */}
-      <div className="verdict-section">
-        {verdict ? (
-          <>
-            <div className={`verdict-badge ${verdictCfg!.className}`}>{verdictCfg!.label}</div>
-            <div className="verdict-confidence">
-              {Math.round(verdict.confidence * 100)}% confidence
-              {verdict.neighborCount > 0 && (
-                <span className="verdict-neighbors">
-                  {' '}
-                  &middot; {verdict.neighborCount} neighbors
-                </span>
-              )}
+      {!timedOut && (
+        <div className="verdict-section">
+          {verdict ? (
+            <>
+              <div className={`verdict-badge ${verdictCfg!.className}`}>{verdictCfg!.label}</div>
+              <div className="verdict-confidence">
+                {Math.round(verdict.confidence * 100)}% confidence
+                {verdict.neighborCount > 0 && (
+                  <span className="verdict-neighbors">
+                    {' '}
+                    &middot; {verdict.neighborCount} neighbors
+                  </span>
+                )}
+              </div>
+            </>
+          ) : (
+            <div className="verdict-loading">
+              <div className="verdict-spinner" />
+              Classifying...
             </div>
-          </>
-        ) : (
-          <div className="verdict-loading">
-            <div className="verdict-spinner" />
-            Classifying...
-          </div>
-        )}
-      </div>
+          )}
+        </div>
+      )}
 
       <LeaderboardTable
         rows={leaderboard}

@@ -16,7 +16,7 @@ import { createSession, getSession, completeSession } from './sessions';
 import { createToken, redeemToken } from './tokens';
 import type { BiometricPayload, Verdict, ClassifyResponse, Merchant } from './types';
 import { MASK_WIDTH, MASK_HEIGHT } from './glyph-masks';
-import { generateDynamicMask } from './dynamic-masks';
+import { generateDynamicImage } from './dynamic-masks';
 import { inferLetter } from './inference';
 import { sboxApply } from './sbox';
 
@@ -36,7 +36,8 @@ const CHALLENGE_SECRET = process.env.CHALLENGE_HMAC_SECRET ?? randomBytes(32).to
 const CHALLENGE_KEY = createHmac('sha256', CHALLENGE_SECRET).update('challenge-key').digest();
 const CHALLENGE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
-// Glyph pool — mirrors the client-side pool in CaptchaPage.tsx
+// Glyph pool — letters only (server validates via EMNIST inference)
+// type union kept for backward compat with in-flight encrypted challenges
 interface ServerGlyph {
   char: string;
   type: 'digit' | 'letter';
@@ -45,11 +46,6 @@ interface ServerGlyph {
 
 const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 const SERVER_GLYPH_POOL: ServerGlyph[] = [
-  ...[2, 3, 4, 7].map((d) => ({
-    char: String(d),
-    type: 'digit' as const,
-    modelIndex: d,
-  })),
   ...['A', 'C', 'E', 'F', 'H', 'J', 'K', 'M', 'N', 'P', 'R', 'T', 'W', 'X', 'Y'].map((ch) => ({
     char: ch,
     type: 'letter' as const,
@@ -77,14 +73,13 @@ function generateServerChallenge(): ServerGlyph[] {
   return all;
 }
 
-const T3_LETTER_POOL = SERVER_GLYPH_POOL.filter((g) => g.type === 'letter');
 const T3_NUM_TARGETS = 5; // max human turns in tic-tac-toe
 
 function generateT3Challenge(): ServerGlyph[] {
   const glyphs: ServerGlyph[] = [];
   const used = new Set<string>();
   while (glyphs.length < T3_NUM_TARGETS) {
-    const g = T3_LETTER_POOL[Math.floor(Math.random() * T3_LETTER_POOL.length)];
+    const g = SERVER_GLYPH_POOL[Math.floor(Math.random() * SERVER_GLYPH_POOL.length)];
     if (!used.has(g.char)) {
       used.add(g.char);
       glyphs.push(g);
@@ -203,7 +198,7 @@ async function deriveAesKeyServer(
   serverPrivKeyPkcs8: string,
   clientPubKeyRaw: string,
   dateSalt: string,
-  usages: KeyUsage[] = ['decrypt']
+  usages: ('encrypt' | 'decrypt')[] = ['decrypt']
 ) {
   // Import server private key (PKCS8 base64)
   const privBytes = Buffer.from(serverPrivKeyPkcs8, 'base64');
@@ -456,14 +451,13 @@ async function handleChallenge(event: APIGatewayProxyEventV2): Promise<APIGatewa
   const glyphs = mode === 't3' ? generateT3Challenge() : generateServerChallenge();
   let challengeId = encryptChallenge(glyphs, Date.now(), mode);
 
-  // Send dynamically generated masks instead of static glyph templates.
-  // Each mask uses a random font + rotation/scale/jitter/elastic deformation,
-  // making every response structurally unique (defeats Hamming-distance matching).
-  const masks = glyphs.map((g) => generateDynamicMask(g.char));
-  const types = glyphs.map((g) => g.type);
+  // Send dynamically generated 8-bit grayscale images instead of static glyph templates.
+  // Each image uses a random font + rotation/scale/jitter/elastic deformation + anti-aliased
+  // edges, background noise, and intensity variation. Defeats template matching and forces OCR.
+  const images = glyphs.map((g) => generateDynamicImage(g.char));
 
   // ECDH key exchange: if client sent its public key, append server's public key to challengeId
-  // and encrypt the mask data so bots can't sniff bitmaps off the wire.
+  // and encrypt the image data so bots can't sniff bitmaps off the wire.
   const clientPubKey = event.headers?.['x-canvas-fp'];
   if (clientPubKey) {
     const ecdhKeys = await loadEcdhKeyPair();
@@ -471,9 +465,9 @@ async function handleChallenge(event: APIGatewayProxyEventV2): Promise<APIGatewa
       challengeId += ecdhKeys.current.rawPublicKey;
 
       try {
-        // Encrypt masks + types with ECDH shared secret
+        // Encrypt images with ECDH shared secret
         const enc = await encryptForClient(
-          { masks, types, maskWidth: MASK_WIDTH, maskHeight: MASK_HEIGHT },
+          { images, width: MASK_WIDTH, height: MASK_HEIGHT },
           ecdhKeys.current.privateKey,
           clientPubKey
         );
@@ -488,15 +482,14 @@ async function handleChallenge(event: APIGatewayProxyEventV2): Promise<APIGatewa
   // Fallback: no ECDH — send plaintext (local dev / key load failure)
   return jsonResponse(200, {
     challengeId,
-    masks,
-    types,
-    maskWidth: MASK_WIDTH,
-    maskHeight: MASK_HEIGHT,
+    images,
+    width: MASK_WIDTH,
+    height: MASK_HEIGHT,
   });
 }
 
 /** Server-side inference: accept if expected letter is in model's top K predictions. */
-const T3_TOP_K = 5;
+const TOP_K = 5;
 
 /** Validate challenge answers against server-side ground truth.
  *  Returns null if valid, or a retry response if mismatched. */
@@ -505,7 +498,6 @@ function validateChallengeAnswers(payload: BiometricPayload): APIGatewayProxyRes
   if (!decrypted) return null; // Non-challenge UUID — skip validation
 
   const { glyphs: expected, mode } = decrypted;
-  const isT3 = mode === 't3';
   const mismatches: string[] = [];
   const checkLen = Math.min(expected.length, payload.digits.length);
 
@@ -516,30 +508,23 @@ function validateChallengeAnswers(payload: BiometricPayload): APIGatewayProxyRes
       mismatches.push(`glyph[${i}]: missing`);
       continue;
     }
-    if (isT3) {
-      // Server-side inference: run the EMNIST model on the image data
-      // instead of trusting client-reported allConfidences.
-      if (!digit.imageData || digit.imageData.length !== 784) {
-        mismatches.push(`glyph[${i}]: missing or invalid imageData`);
-        continue;
-      }
-      const result = inferLetter(digit.imageData);
-      const serverConf = result.allConfidences[exp.modelIndex] ?? 0;
+    // Server-side inference for ALL glyphs (CAPTCHA + T3)
+    if (!digit.imageData || digit.imageData.length !== 784) {
+      mismatches.push(`glyph[${i}]: missing or invalid imageData`);
+      continue;
+    }
+    const result = inferLetter(digit.imageData);
+    const serverConf = result.allConfidences[exp.modelIndex] ?? 0;
 
-      // Accept if expected letter is in model's top K predictions
-      const indexed = result.allConfidences.map((c, idx) => ({ idx, c }));
-      indexed.sort((a, b) => b.c - a.c);
-      const topK = indexed.slice(0, T3_TOP_K).map((e) => e.idx);
+    // Accept if expected letter is in model's top K predictions
+    const indexed = result.allConfidences.map((c, idx) => ({ idx, c }));
+    indexed.sort((a, b) => b.c - a.c);
+    const topK = indexed.slice(0, TOP_K).map((e) => e.idx);
 
-      if (!topK.includes(exp.modelIndex)) {
-        const serverTop = LETTERS[result.index];
-        mismatches.push(
-          `glyph[${i}]: expected ${exp.char} not in server top-${T3_TOP_K} (top=${serverTop}, conf=${(serverConf * 100).toFixed(1)}%)`
-        );
-      }
-    } else if (digit.recognized !== exp.modelIndex) {
+    if (!topK.includes(exp.modelIndex)) {
+      const serverTop = LETTERS[result.index];
       mismatches.push(
-        `glyph[${i}]: expected ${exp.char}(${exp.modelIndex}) got ${digit.recognized}`
+        `glyph[${i}]: expected ${exp.char} not in server top-${TOP_K} (top=${serverTop}, conf=${(serverConf * 100).toFixed(1)}%)`
       );
     }
   }

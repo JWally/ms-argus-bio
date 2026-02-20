@@ -1,14 +1,14 @@
 import { useMemo } from 'react';
 import DotChallenge from '../DotChallenge';
-import { noisifyMask } from '../../utils/mask';
+import { noisifyImage } from '../../utils/mask';
 import type { Board, GamePhase } from '../../game/t3-types';
 
 interface Props {
   phase: GamePhase;
-  /** Base64-encoded 1-bit packed mask from the server (or client fallback) */
-  mask: string;
-  maskWidth: number;
-  maskHeight: number;
+  /** Base64-encoded 8-bit grayscale image from the server (or client fallback) */
+  image: string;
+  imageWidth: number;
+  imageHeight: number;
   message: string;
   board: Board;
   selectedCell: number | null;
@@ -16,9 +16,9 @@ interface Props {
 
 export default function GameStatus({
   phase,
-  mask,
-  maskWidth,
-  maskHeight,
+  image,
+  imageWidth,
+  imageHeight,
   message,
   board,
   selectedCell,
@@ -27,9 +27,9 @@ export default function GameStatus({
   const boardEmpty = board.every((c) => c === null);
   const dimmed = phase === 'ai-turn';
 
-  const noisyMask = useMemo(
-    () => (isPlaying && mask ? noisifyMask(mask, maskWidth, maskHeight) : ''),
-    [mask, maskWidth, maskHeight, isPlaying]
+  const noisyImage = useMemo(
+    () => (isPlaying && image ? noisifyImage(image) : ''),
+    [image, isPlaying]
   );
 
   return (
@@ -44,10 +44,11 @@ export default function GameStatus({
       {isPlaying && (
         <div className={`t3-status-letter${dimmed ? ' t3-status-dimmed' : ''}`}>
           <DotChallenge
-            masks={[noisyMask]}
-            maskWidth={maskWidth}
-            maskHeight={maskHeight}
+            images={[noisyImage]}
+            imageWidth={imageWidth}
+            imageHeight={imageHeight}
             currentIndex={0}
+            frameStep={4}
           />
         </div>
       )}

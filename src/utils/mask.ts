@@ -1,11 +1,11 @@
-export const CLIENT_MASK_WIDTH = 64;
-export const CLIENT_MASK_HEIGHT = 48;
+export const CLIENT_IMAGE_WIDTH = 64;
+export const CLIENT_IMAGE_HEIGHT = 48;
 
-/** Render a single character to a 1-bit packed base64 mask (client-side fallback) */
-export function buildClientMask(
+/** Render a single character to a raw 8-bit grayscale base64 image (client-side fallback) */
+export function buildClientImage(
   char: string,
-  w = CLIENT_MASK_WIDTH,
-  h = CLIENT_MASK_HEIGHT
+  w = CLIENT_IMAGE_WIDTH,
+  h = CLIENT_IMAGE_HEIGHT
 ): string {
   const off = document.createElement('canvas');
   off.width = w;
@@ -19,35 +19,36 @@ export function buildClientMask(
   ctx.textBaseline = 'middle';
   ctx.fillText(char, w / 2, h / 2 + 1);
   const data = ctx.getImageData(0, 0, w, h).data;
-  const bytes = new Uint8Array(Math.ceil((w * h) / 8));
+  // Read red channel directly as 8-bit grayscale (1 byte per pixel)
+  const bytes = new Uint8Array(w * h);
   for (let i = 0; i < w * h; i++) {
-    if (data[i * 4] > 128) {
-      bytes[Math.floor(i / 8)] |= 1 << (7 - (i % 8));
-    }
+    bytes[i] = data[i * 4];
   }
   return btoa(String.fromCharCode(...bytes));
 }
 
-/** Apply random bit-flip noise to a 1-bit packed mask (base64 → base64).
- *  Browser equivalent of the server's Node Buffer version. */
-export function noisifyMask(
-  b64: string,
-  w = CLIENT_MASK_WIDTH,
-  h = CLIENT_MASK_HEIGHT,
-  noiseRate = 0.03
-): string {
+/** Convert a 1-bit packed mask (base64) to an 8-bit grayscale image (base64).
+ *  Used for backward compat when the server still sends old format. */
+export function mask1bitTo8bit(b64: string, w: number, h: number): string {
+  const raw = atob(b64);
+  const packed = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) packed[i] = raw.charCodeAt(i);
+  const total = w * h;
+  const out = new Uint8Array(total);
+  for (let i = 0; i < total; i++) {
+    out[i] = ((packed[i >> 3] >> (7 - (i & 7))) & 1) * 255;
+  }
+  return btoa(String.fromCharCode(...out));
+}
+
+/** Apply random noise to an 8-bit grayscale image (base64 → base64).
+ *  Adds ±15 per byte, clamped to [0, 255]. */
+export function noisifyImage(b64: string, noiseRange = 15): string {
   const raw = atob(b64);
   const out = new Uint8Array(raw.length);
   for (let i = 0; i < raw.length; i++) {
-    out[i] = raw.charCodeAt(i);
-  }
-  const totalBits = w * h;
-  const flips = Math.round(totalBits * noiseRate);
-  for (let f = 0; f < flips; f++) {
-    const bit = Math.floor(Math.random() * totalBits);
-    const byteIdx = Math.floor(bit / 8);
-    const bitIdx = 7 - (bit % 8);
-    out[byteIdx] ^= 1 << bitIdx;
+    const val = raw.charCodeAt(i) + Math.round((Math.random() - 0.5) * 2 * noiseRange);
+    out[i] = Math.max(0, Math.min(255, val));
   }
   return btoa(String.fromCharCode(...out));
 }

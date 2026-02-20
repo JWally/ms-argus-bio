@@ -17,28 +17,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const MASK_W = 64;
 const MASK_H = 48;
 
-// Same glyph set as CaptchaPage.tsx / handler.ts
-const GLYPHS = [
-  '2',
-  '3',
-  '4',
-  '7',
-  'A',
-  'C',
-  'E',
-  'F',
-  'H',
-  'J',
-  'K',
-  'M',
-  'N',
-  'P',
-  'R',
-  'T',
-  'W',
-  'X',
-  'Y',
-];
+// Same glyph set as CaptchaPage.tsx / handler.ts (letters only)
+const GLYPHS = ['A', 'C', 'E', 'F', 'H', 'J', 'K', 'M', 'N', 'P', 'R', 'T', 'W', 'X', 'Y'];
 
 // Font variants — distinct families produce structurally different letterforms.
 // Each entry: [fontSpec, yOffset] to account for baseline differences.

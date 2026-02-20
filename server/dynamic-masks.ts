@@ -208,3 +208,53 @@ export function generateDynamicMask(char: string): string {
 
   return pack(pixels);
 }
+
+/** Generate a dynamically transformed 8-bit grayscale image for a glyph character.
+ *  Same transform pipeline as generateDynamicMask but outputs raw 8-bit grayscale
+ *  (1 byte per pixel) with anti-aliased edges, background noise, and intensity
+ *  variation. Forces attackers to do real OCR instead of binary template matching. */
+export function generateDynamicImage(char: string): string {
+  const variants = GLYPH_VARIANTS[char];
+  if (!variants || variants.length === 0) {
+    throw new Error(`No image variants for glyph: ${char}`);
+  }
+
+  // Pick random font variant
+  const variant = variants[Math.floor(Math.random() * variants.length)];
+  let pixels = unpack(variant);
+
+  // Random rotation ±12°
+  const angle = (Math.random() - 0.5) * 24 * (Math.PI / 180);
+  // Random scale 0.88–1.12
+  const scale = 0.88 + Math.random() * 0.24;
+  // Random position jitter ±2px
+  const dx = (Math.random() - 0.5) * 4;
+  const dy = (Math.random() - 0.5) * 4;
+
+  pixels = affineTransform({ src: pixels, angle, scale, dx, dy });
+
+  // Elastic deformation (strength 2.0–3.5px displacement)
+  const elasticStrength = 2.0 + Math.random() * 1.5;
+  pixels = elasticDeform(pixels, elasticStrength);
+
+  // 1-pass box blur (radius 1) for anti-aliased edges
+  boxBlur(pixels, W, H, 1);
+
+  // Vary glyph intensity: multiply all foreground values by random factor in [0.7, 1.0]
+  const intensity = 0.7 + Math.random() * 0.3;
+  for (let i = 0; i < TOTAL; i++) {
+    pixels[i] *= intensity;
+  }
+
+  // Add per-pixel background noise: += (random - 0.5) * 0.15, clamped to [0, 1]
+  for (let i = 0; i < TOTAL; i++) {
+    pixels[i] = Math.max(0, Math.min(1, pixels[i] + (Math.random() - 0.5) * 0.15));
+  }
+
+  // Pack as raw 8-bit grayscale (1 byte per pixel, 0-255)
+  const bytes = Buffer.alloc(TOTAL);
+  for (let i = 0; i < TOTAL; i++) {
+    bytes[i] = Math.round(pixels[i] * 255);
+  }
+  return bytes.toString('base64');
+}

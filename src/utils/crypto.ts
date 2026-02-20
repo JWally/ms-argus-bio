@@ -117,12 +117,7 @@ export async function decryptChallengeResponse(
   encryptedB64: string,
   clientPrivateKey: CryptoKey,
   serverPublicKeyB64: string
-): Promise<{
-  masks: string[];
-  types: ('digit' | 'letter')[];
-  maskWidth: number;
-  maskHeight: number;
-}> {
+): Promise<Record<string, unknown>> {
   const packed = base64ToUint8(encryptedB64);
   // .slice() creates fresh ArrayBuffer copies (avoids TS ArrayBufferLike issues with subarray)
   const iv = packed.slice(0, 12);

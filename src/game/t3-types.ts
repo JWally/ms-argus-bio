@@ -36,7 +36,7 @@ export interface GameState {
   currentMaskIndex: number;
   selectedCell: number | null;
   winLine: WinLine | null;
-  winner: Player | 'draw' | null;
+  winner: Player | 'draw' | 'timeout' | null;
   message: string;
   turnHistory: TurnRecord[];
   /** Accumulated human thinking time from completed turns */
@@ -59,4 +59,5 @@ export type GameAction =
     }
   | { type: 'RECOGNIZE_FAIL' }
   | { type: 'AI_MOVE'; cellIndex: number; letter: string }
+  | { type: 'TIMEOUT'; elapsedMs: number }
   | { type: 'RESET'; aiFirst?: boolean };

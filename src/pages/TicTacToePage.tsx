@@ -1,6 +1,4 @@
 import { useReducer, useEffect, useRef, useCallback, useState } from 'react';
-import * as tf from '@tensorflow/tfjs';
-import { loadLetterModel, predictLetter } from '../ml/letter-model';
 import TicTacToeCanvas, { type T3CanvasHandle, CELL_SIZE } from '../components/t3/TicTacToeCanvas';
 import GameStatus from '../components/t3/GameStatus';
 import GameOverPanel from '../components/t3/GameOverPanel';
@@ -14,7 +12,12 @@ import {
   detectCDP,
   type VerdictResult,
 } from '../utils/biometrics';
-import { buildClientMask, CLIENT_MASK_WIDTH, CLIENT_MASK_HEIGHT } from '../utils/mask';
+import {
+  buildClientImage,
+  mask1bitTo8bit,
+  CLIENT_IMAGE_WIDTH,
+  CLIENT_IMAGE_HEIGHT,
+} from '../utils/mask';
 import { extractServerKey } from '../utils/crypto';
 import { initCrypto, workerDecrypt, workerEncrypt } from '../utils/crypto-worker-client';
 import { renderTo28x28 } from '../ml/preprocess';
@@ -23,22 +26,13 @@ import '../styles/t3.css';
 
 const API_URL = import.meta.env.VITE_API_URL as string | undefined;
 
-const RECOGNITION_THRESHOLD = 0.15;
 const AI_DELAY_MS = 500;
+const GAME_TIMEOUT_MS = 180_000;
 const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 const PHASE_HUMAN_DRAW = 'human-draw';
 const T3_LETTERS = 'ACEFHJKMNPRTWXY';
 const INFERENCE_STROKE_WIDTH = 4;
-
-// Pre-compute the valid T3 letter indices in the 26-letter alphabet
-const T3_VALID_INDICES = new Set(T3_LETTERS.split('').map((ch) => LETTERS.indexOf(ch)));
-
-/** Mask softmax confidences to only T3 pool letters, renormalize */
-function maskT3Confidences(raw: number[]): number[] {
-  const masked = raw.map((c, i) => (T3_VALID_INDICES.has(i) ? c : 0));
-  const sum = masked.reduce((s, c) => s + c, 0);
-  return sum > 0 ? masked.map((c) => c / sum) : masked;
-}
+const INK_THRESHOLD = 15;
 
 /** Reusable offscreen canvas for clean white-on-black inference rendering */
 let _inferCanvas: HTMLCanvasElement | null = null;
@@ -83,18 +77,18 @@ interface TurnStrokeData {
   imageData: number[];
 }
 
-/** Generate 5 client-side fallback masks (for local dev without API) */
-function generateFallbackMasks(): string[] {
+/** Generate 5 client-side fallback images (for local dev without API) */
+function generateFallbackImages(): string[] {
   const used = new Set<string>();
-  const masks: string[] = [];
-  while (masks.length < 5) {
+  const images: string[] = [];
+  while (images.length < 5) {
     const ch = T3_LETTERS[Math.floor(Math.random() * T3_LETTERS.length)];
     if (!used.has(ch)) {
       used.add(ch);
-      masks.push(buildClientMask(ch));
+      images.push(buildClientImage(ch));
     }
   }
-  return masks;
+  return images;
 }
 
 function initialState(): GameState {
@@ -267,6 +261,17 @@ function reducer(state: GameState, action: GameAction): GameState {
       };
     }
 
+    case 'TIMEOUT':
+      return {
+        ...state,
+        phase: 'game-over' as const,
+        selectedCell: null,
+        winner: 'timeout' as const,
+        message: '',
+        turnStartMs: null,
+        elapsedMs: action.elapsedMs,
+      };
+
     case 'RESET': {
       const aiFirst = action.aiFirst ?? false;
       return {
@@ -311,7 +316,6 @@ export default function TicTacToePage() {
   const [showModal, setShowModal] = useState(false);
   const [retryMsg, setRetryMsg] = useState<string | null>(null);
   const [flashKey, setFlashKey] = useState(0);
-  const modelRef = useRef<tf.LayersModel | null>(null);
   const canvasRef = useRef<T3CanvasHandle>(null);
   const rafRef = useRef(0);
   const timerRef = useRef<HTMLDivElement>(null);
@@ -323,8 +327,8 @@ export default function TicTacToePage() {
   const challengeIdRef = useRef<string>('');
   const rawPublicKeyRef = useRef<string>('');
   const serverPubKeyRef = useRef<string>('');
-  const [challengeMasks, setChallengeMasks] = useState<string[]>([]);
-  const [maskDims, setMaskDims] = useState({ w: CLIENT_MASK_WIDTH, h: CLIENT_MASK_HEIGHT });
+  const [challengeImages, setChallengeImages] = useState<string[]>([]);
+  const [imageDims, setImageDims] = useState({ w: CLIENT_IMAGE_WIDTH, h: CLIENT_IMAGE_HEIGHT });
 
   /** Fetch a T3 challenge from the server, or fall back to client-side generation.
    *  Also performs ECDH key exchange: sends client pubkey, extracts server pubkey.
@@ -332,8 +336,8 @@ export default function TicTacToePage() {
   const fetchT3Challenge = useCallback(async () => {
     const fallback = {
       id: '',
-      masks: generateFallbackMasks(),
-      dims: { w: CLIENT_MASK_WIDTH, h: CLIENT_MASK_HEIGHT },
+      images: generateFallbackImages(),
+      dims: { w: CLIENT_IMAGE_WIDTH, h: CLIENT_IMAGE_HEIGHT },
     };
     if (!API_URL) return fallback;
     try {
@@ -357,21 +361,31 @@ export default function TicTacToePage() {
         serverPubKeyRef.current = extracted.serverPubKey;
       }
 
-      // Decrypt encrypted challenge data if present (ECDH-encrypted masks)
+      // Decrypt or read plaintext challenge data.
+      // Handles both new format (8-bit images) and old format (1-bit masks).
+      let images: string[];
+      let dims: { w: number; h: number };
       if (data.enc && rawPublicKeyRef.current && extracted.serverPubKey) {
         const decrypted = await workerDecrypt(data.enc as string, extracted.serverPubKey);
-        return {
-          id: extracted.challengeId,
-          masks: decrypted.masks,
-          dims: { w: decrypted.maskWidth, h: decrypted.maskHeight },
-        };
+        if ('images' in decrypted) {
+          images = decrypted.images;
+          dims = { w: decrypted.width, h: decrypted.height };
+        } else {
+          images = decrypted.masks.map((m) =>
+            mask1bitTo8bit(m, decrypted.maskWidth, decrypted.maskHeight)
+          );
+          dims = { w: decrypted.maskWidth, h: decrypted.maskHeight };
+        }
+      } else if (Array.isArray(data.images)) {
+        images = data.images as string[];
+        dims = { w: data.width as number, h: data.height as number };
+      } else {
+        images = (data.masks as string[]).map((m: string) =>
+          mask1bitTo8bit(m, data.maskWidth, data.maskHeight)
+        );
+        dims = { w: data.maskWidth as number, h: data.maskHeight as number };
       }
-
-      return {
-        id: extracted.challengeId,
-        masks: data.masks as string[],
-        dims: { w: data.maskWidth as number, h: data.maskHeight as number },
-      };
+      return { id: extracted.challengeId, images, dims };
     } catch {
       return fallback;
     }
@@ -381,17 +395,16 @@ export default function TicTacToePage() {
   const applyChallenge = useCallback(async () => {
     const c = await fetchT3Challenge();
     challengeIdRef.current = c.id;
-    setChallengeMasks(c.masks);
-    setMaskDims(c.dims);
+    setChallengeImages(c.images);
+    setImageDims(c.dims);
   }, [fetchT3Challenge]);
 
-  // Load model + fetch challenge on mount
+  // Fetch challenge on mount
   useEffect(() => {
-    Promise.all([loadLetterModel(), fetchT3Challenge()]).then(([model, challenge]) => {
-      modelRef.current = model;
+    fetchT3Challenge().then((challenge) => {
       challengeIdRef.current = challenge.id;
-      setChallengeMasks(challenge.masks);
-      setMaskDims(challenge.dims);
+      setChallengeImages(challenge.images);
+      setImageDims(challenge.dims);
       dispatch({ type: 'MODEL_LOADED' });
     });
   }, [fetchT3Challenge]);
@@ -424,6 +437,26 @@ export default function TicTacToePage() {
 
     return () => clearTimeout(timer);
   }, [state.phase, state.board]);
+
+  // 3-minute wall-clock timeout
+  const { phase, humanTimeMs, turnStartMs } = state;
+  useEffect(() => {
+    if (gameStartTimeRef.current === 0) return;
+    const isPlaying = phase === 'human-draw' || phase === 'human-recognize' || phase === 'ai-turn';
+    if (!isPlaying) return;
+
+    const computeElapsed = () => humanTimeMs + (turnStartMs ? performance.now() - turnStartMs : 0);
+    const wallElapsed = performance.now() - gameStartTimeRef.current;
+    const remaining = GAME_TIMEOUT_MS - wallElapsed;
+    if (remaining <= 0) {
+      dispatch({ type: 'TIMEOUT', elapsedMs: computeElapsed() });
+      return;
+    }
+    const timer = setTimeout(() => {
+      dispatch({ type: 'TIMEOUT', elapsedMs: computeElapsed() });
+    }, remaining);
+    return () => clearTimeout(timer);
+  }, [phase, humanTimeMs, turnStartMs]);
 
   // Send biometric payload when game ends
   const sendBiometricPayload = useCallback(() => {
@@ -503,7 +536,10 @@ export default function TicTacToePage() {
   const prevPhaseRef = useRef(state.phase);
   useEffect(() => {
     if (prevPhaseRef.current !== 'game-over' && state.phase === 'game-over') {
-      sendBiometricPayload();
+      // Don't send payload on timeout — game wasn't completed
+      if (state.winner !== 'timeout') {
+        sendBiometricPayload();
+      }
       const delay = state.winner === 'human' ? MODAL_DELAY_WIN : MODAL_DELAY_LOSS;
       const timer = setTimeout(() => setShowModal(true), delay);
       prevPhaseRef.current = state.phase;
@@ -514,21 +550,15 @@ export default function TicTacToePage() {
 
   // ── Recognition helpers ─────────────────────────────────────────────
 
-  /** Try to recognize the current cell — recognizability-only.
-   *  Client has NO knowledge of the target letter — it only checks "is this a letter?"
-   *  Server validates correctness by decrypting the challengeId.
-   *
-   *  Uses a clean white-on-black offscreen canvas for inference (not the game canvas)
-   *  because the game canvas has green strokes (R=34 — model sees 13% brightness),
-   *  grid lines, and cell highlights that confuse the model. */
+  /** Check if the user drew enough ink in the selected cell.
+   *  Client has NO knowledge of the target letter — server validates via EMNIST inference. */
   const tryRecognize = useCallback((): {
     cellIndex: number;
     letter: string;
     confidence: number;
     allConfidences: number[];
   } | null => {
-    if (state.phase !== PHASE_HUMAN_DRAW || state.selectedCell === null || !modelRef.current)
-      return null;
+    if (state.phase !== PHASE_HUMAN_DRAW || state.selectedCell === null) return null;
 
     const cellStrokes = canvasRef.current?.getCellStrokes();
     if (!cellStrokes || cellStrokes.length === 0) return null;
@@ -536,31 +566,11 @@ export default function TicTacToePage() {
     const cellIndex = state.selectedCell;
     const col = cellIndex % 3;
     const row = Math.floor(cellIndex / 3);
+    const imageData = getCellImageData(cellStrokes, col * CELL_SIZE, row * CELL_SIZE);
+    const inkPixels = imageData.filter((v) => v > 20).length;
 
-    // Render strokes white-on-black on a clean canvas — no grid, no green
-    const cleanCanvas = renderCleanInference(cellStrokes, col * CELL_SIZE, row * CELL_SIZE);
-
-    const result = predictLetter(modelRef.current, cleanCanvas, {
-      x: 0,
-      y: 0,
-      w: CELL_SIZE,
-      h: CELL_SIZE,
-    });
-
-    // Mask softmax to only T3 pool letters (removes L, I, O, D, etc.)
-    const masked = maskT3Confidences(result.allConfidences);
-    const topIdx = masked.indexOf(Math.max(...masked));
-    const letter = LETTERS[topIdx];
-    const confidence = masked[topIdx];
-
-    // eslint-disable-next-line no-console
-    console.log(
-      `[T3] Raw top: ${result.letter} (${(result.confidence * 100).toFixed(1)}%) → Masked top: ${letter} (${(confidence * 100).toFixed(1)}%)`
-    );
-
-    // Recognizability-only: accept any T3 letter at threshold.
-    if (confidence >= RECOGNITION_THRESHOLD) {
-      return { cellIndex, letter, confidence, allConfidences: masked };
+    if (inkPixels >= INK_THRESHOLD) {
+      return { cellIndex, letter: '?', confidence: 1, allConfidences: [] };
     }
     return null;
   }, [state.phase, state.selectedCell]);
@@ -659,7 +669,7 @@ export default function TicTacToePage() {
         ? `timer ${state.winner === 'human' ? 'timer-success' : 'timer-fail'}`
         : 'timer';
 
-  const currentMask = challengeMasks[state.currentMaskIndex] ?? '';
+  const currentImage = challengeImages[state.currentMaskIndex] ?? '';
 
   return (
     <div className={`app${isPlaying ? ' t3-compact' : ''}`}>
@@ -674,9 +684,9 @@ export default function TicTacToePage() {
       <div className="t3-page">
         <GameStatus
           phase={state.phase}
-          mask={currentMask}
-          maskWidth={maskDims.w}
-          maskHeight={maskDims.h}
+          image={currentImage}
+          imageWidth={imageDims.w}
+          imageHeight={imageDims.h}
           message={state.message}
           board={state.board}
           selectedCell={state.selectedCell}

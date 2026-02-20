@@ -30,7 +30,7 @@ interface Props {
   board: Board;
   selectedCell: number | null;
   winLine: WinLine | null;
-  winner: Player | 'draw' | null;
+  winner: Player | 'draw' | 'timeout' | null;
   phase: GamePhase;
   onCellSelect: (cellIndex: number) => void;
   onStrokeEnd: () => void;

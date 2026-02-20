@@ -98,6 +98,21 @@ function make28x28(): HTMLCanvasElement {
   return _out28;
 }
 
+/** Extract the preprocessed 28x28 grayscale image as a flat 784-element array.
+ *  Returns raw 0-255 values (server normalizes internally). */
+export function getImageData28x28(canvas: HTMLCanvasElement): number[] {
+  const region = { sx: 0, sy: 0, sw: canvas.width, sh: canvas.height };
+  const { outCanvas, empty } = renderTo28x28(canvas, region, 20);
+  if (empty) return new Array(784).fill(0);
+
+  const outData = outCanvas.getContext('2d')!.getImageData(0, 0, 28, 28);
+  const result: number[] = [];
+  for (let i = 0; i < 784; i++) {
+    result.push(outData.data[i * 4]); // 0-255 raw — server normalizes internally
+  }
+  return result;
+}
+
 /** Reusable temporary canvas for region extraction */
 let _tmpRegion: HTMLCanvasElement | null = null;
 let _tmpW = 0;

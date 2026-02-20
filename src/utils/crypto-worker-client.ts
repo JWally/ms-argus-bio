@@ -61,25 +61,18 @@ export async function initCrypto(): Promise<{ rawPublicKey: string; usingWorker:
   }
 }
 
+/** Decrypted challenge — new format (8-bit images) or old format (1-bit masks) */
+export type DecryptedChallenge =
+  | { images: string[]; width: number; height: number }
+  | { masks: string[]; types: string[]; maskWidth: number; maskHeight: number };
+
 /** Decrypt challenge response from server. */
 export async function workerDecrypt(
   encryptedB64: string,
   serverPubKeyB64: string
-): Promise<{
-  masks: string[];
-  types: ('digit' | 'letter')[];
-  maskWidth: number;
-  maskHeight: number;
-}> {
+): Promise<DecryptedChallenge> {
   if (usingWorker && worker) {
-    const result = await postAndWait<{
-      data: {
-        masks: string[];
-        types: ('digit' | 'letter')[];
-        maskWidth: number;
-        maskHeight: number;
-      };
-    }>({
+    const result = await postAndWait<{ data: DecryptedChallenge }>({
       type: 'decrypt',
       encryptedB64,
       serverPubKeyB64,
@@ -89,7 +82,11 @@ export async function workerDecrypt(
 
   // Fallback: main-thread decryption
   if (!fallbackKeys) throw new Error('Crypto not initialized');
-  return decryptChallengeResponse(encryptedB64, fallbackKeys.privateKey, serverPubKeyB64);
+  return decryptChallengeResponse(
+    encryptedB64,
+    fallbackKeys.privateKey,
+    serverPubKeyB64
+  ) as Promise<DecryptedChallenge>;
 }
 
 /** Encrypt payload for server. Returns Uint8Array. */

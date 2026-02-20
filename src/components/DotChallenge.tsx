@@ -1,11 +1,13 @@
 import { useRef, useEffect, useMemo } from 'react';
 
 interface DotChallengeProps {
-  /** Base64-encoded 1-bit packed masks from the server (one per glyph) */
-  masks: string[];
-  maskWidth: number;
-  maskHeight: number;
+  /** Base64-encoded 8-bit grayscale images from the server (one per glyph) */
+  images: string[];
+  imageWidth: number;
+  imageHeight: number;
   currentIndex: number;
+  /** How many frame groups to advance per rAF tick (default 1). Higher = faster cycling. */
+  frameStep?: number;
 }
 
 // Color palettes — bright letter dots, dim background dots
@@ -40,37 +42,29 @@ interface Dot {
   frameGroup: number;
 }
 
-/** Unpack a base64-encoded 1-bit mask into a boolean lookup array */
-function unpackMask(b64: string, mw: number, mh: number): Uint8Array {
+/** Unpack a base64-encoded 8-bit grayscale image into raw bytes (0-255 per pixel) */
+function unpackImage(b64: string): Uint8Array {
   const raw = atob(b64);
   const bytes = new Uint8Array(raw.length);
-  for (let i = 0; i < raw.length; i++) {
-    bytes[i] = raw.charCodeAt(i);
-  }
-  const bits = new Uint8Array(mw * mh);
-  for (let i = 0; i < mw * mh; i++) {
-    const byteIdx = Math.floor(i / 8);
-    const bitIdx = 7 - (i % 8);
-    bits[i] = (bytes[byteIdx] >> bitIdx) & 1;
-  }
-  return bits;
+  for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+  return bytes;
 }
 
-interface SampleMaskOpts {
-  maskBits: Uint8Array;
-  mw: number;
-  mh: number;
+interface SampleImageOpts {
+  pixels: Uint8Array;
+  iw: number;
+  ih: number;
   x: number;
   y: number;
   containerW: number;
   containerH: number;
 }
 
-/** Sample the pre-computed mask at scaled coordinates (nearest-neighbor) */
-function sampleMask({ maskBits, mw, mh, x, y, containerW, containerH }: SampleMaskOpts): boolean {
-  const mx = Math.min(mw - 1, Math.max(0, Math.floor((x / containerW) * mw)));
-  const my = Math.min(mh - 1, Math.max(0, Math.floor((y / containerH) * mh)));
-  return maskBits[my * mw + mx] === 1;
+/** Sample the pre-computed image at scaled coordinates (nearest-neighbor) */
+function sampleImage({ pixels, iw, ih, x, y, containerW, containerH }: SampleImageOpts): boolean {
+  const mx = Math.min(iw - 1, Math.max(0, Math.floor((x / containerW) * iw)));
+  const my = Math.min(ih - 1, Math.max(0, Math.floor((y / containerH) * ih)));
+  return pixels[my * iw + mx] > 128;
 }
 
 interface BgColorOpts {
@@ -99,16 +93,16 @@ function pickRadius(): number {
 }
 
 interface ComputeDotsOpts {
-  maskBits: Uint8Array;
-  mw: number;
-  mh: number;
+  pixels: Uint8Array;
+  iw: number;
+  ih: number;
   activeSlot: number;
   w: number;
   h: number;
   slotW: number;
 }
 
-function computeDots({ maskBits, mw, mh, activeSlot, w, h, slotW }: ComputeDotsOpts): Dot[] {
+function computeDots({ pixels, iw, ih, activeSlot, w, h, slotW }: ComputeDotsOpts): Dot[] {
   const dots: Dot[] = [];
   const numSlots = 1; // We show one glyph at a time
   for (let y = DOT_R + 1; y < h - DOT_R; y += GAP) {
@@ -119,7 +113,7 @@ function computeDots({ maskBits, mw, mh, activeSlot, w, h, slotW }: ComputeDotsO
       const slot = Math.min(numSlots - 1, Math.floor(jx / slotW));
       const state = slot < activeSlot ? 'done' : slot === activeSlot ? 'current' : 'upcoming';
 
-      const isDigit = sampleMask({ maskBits, mw, mh, x: jx, y: jy, containerW: w, containerH: h });
+      const isDigit = sampleImage({ pixels, iw, ih, x: jx, y: jy, containerW: w, containerH: h });
 
       const bgColor = pickBgColor({ state, jx, jy, slotW, slot, h });
       const realColor = isDigit ? pick(DIGIT_PALETTES[state]) : bgColor;
@@ -139,23 +133,24 @@ function computeDots({ maskBits, mw, mh, activeSlot, w, h, slotW }: ComputeDotsO
 }
 
 export default function DotChallenge({
-  masks,
-  maskWidth,
-  maskHeight,
+  images,
+  imageWidth,
+  imageHeight,
   currentIndex,
+  frameStep = 1,
 }: DotChallengeProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef(0);
 
-  const currentMask = useMemo(
-    () => (masks[currentIndex] ? unpackMask(masks[currentIndex], maskWidth, maskHeight) : null),
-    [masks, currentIndex, maskWidth, maskHeight]
+  const currentImage = useMemo(
+    () => (images[currentIndex] ? unpackImage(images[currentIndex]) : null),
+    [images, currentIndex]
   );
   const activeSlot = 0;
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || !currentMask) return;
+    if (!canvas || !currentImage) return;
 
     const containerWidth = canvas.parentElement?.clientWidth ?? 280;
     const w = containerWidth;
@@ -172,9 +167,9 @@ export default function DotChallenge({
 
     const slotW = w;
     const dots = computeDots({
-      maskBits: currentMask,
-      mw: maskWidth,
-      mh: maskHeight,
+      pixels: currentImage,
+      iw: imageWidth,
+      ih: imageHeight,
       activeSlot,
       w,
       h,
@@ -217,13 +212,13 @@ export default function DotChallenge({
         }
       }
 
-      frameIndex = (frameIndex + 1) % NUM_FRAMES;
+      frameIndex = (frameIndex + frameStep) % NUM_FRAMES;
       rafRef.current = requestAnimationFrame(draw);
     };
 
     rafRef.current = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(rafRef.current);
-  }, [currentMask, maskWidth, maskHeight, activeSlot]);
+  }, [currentImage, imageWidth, imageHeight, activeSlot, frameStep]);
 
   return <canvas ref={canvasRef} className="dot-challenge-canvas" aria-hidden="true" />;
 }
