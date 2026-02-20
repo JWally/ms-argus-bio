@@ -15,7 +15,8 @@ import { lookupMerchantBySecret, validateReturnUrl } from './merchants';
 import { createSession, getSession, completeSession } from './sessions';
 import { createToken, redeemToken } from './tokens';
 import type { BiometricPayload, Verdict, ClassifyResponse, Merchant } from './types';
-import { GLYPH_MASKS, MASK_WIDTH, MASK_HEIGHT } from './glyph-masks';
+import { MASK_WIDTH, MASK_HEIGHT } from './glyph-masks';
+import { generateDynamicMask } from './dynamic-masks';
 import { inferLetter } from './inference';
 import { sboxApply } from './sbox';
 
@@ -450,30 +451,15 @@ async function parseAndAuth(
   return { ok: true, body: bodyOrError, merchant };
 }
 
-/** Apply random bit-flip noise to a 1-bit packed mask (base64 → base64).
- *  Flips ~noiseRate fraction of bits to defeat template-matching attacks. */
-function noisifyMask(b64: string, noiseRate = 0.03): string {
-  const bytes = Buffer.from(b64, 'base64');
-  const out = Buffer.from(bytes);
-  const totalBits = MASK_WIDTH * MASK_HEIGHT;
-  const flips = Math.round(totalBits * noiseRate);
-  for (let f = 0; f < flips; f++) {
-    const bit = Math.floor(Math.random() * totalBits);
-    const byteIdx = Math.floor(bit / 8);
-    const bitIdx = 7 - (bit % 8);
-    out[byteIdx] ^= 1 << bitIdx;
-  }
-  return out.toString('base64');
-}
-
 async function handleChallenge(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
   const mode = event.queryStringParameters?.mode;
   const glyphs = mode === 't3' ? generateT3Challenge() : generateServerChallenge();
   let challengeId = encryptChallenge(glyphs, Date.now(), mode);
 
-  // Send masks (with noise) instead of glyph characters.
-  // The client never sees char or modelIndex — only the server can decrypt challengeId.
-  const masks = glyphs.map((g) => noisifyMask(GLYPH_MASKS[g.char]));
+  // Send dynamically generated masks instead of static glyph templates.
+  // Each mask uses a random font + rotation/scale/jitter/elastic deformation,
+  // making every response structurally unique (defeats Hamming-distance matching).
+  const masks = glyphs.map((g) => generateDynamicMask(g.char));
   const types = glyphs.map((g) => g.type);
 
   // ECDH key exchange: if client sent its public key, append server's public key to challengeId
