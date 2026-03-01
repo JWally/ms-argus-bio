@@ -73,6 +73,7 @@ function getBotReason(payload: BiometricPayload): string | null {
 
   // ── Hard bot signals (any one triggers) ──
   if (payload.completionTimeMs < 500) return `fast:${payload.completionTimeMs}ms`;
+  if (payload.completionTimeMs > 30_000) return `slow:${payload.completionTimeMs}ms`;
   if (f.eventFrequencyHz > 300) return `freq:${f.eventFrequencyHz.toFixed(1)}Hz`;
   if (f.speedVariance === 0 && f.totalPoints > 20) return 'zero-speed-variance';
   if (f.totalPoints > 20 && zeroDtRatio(payload) > 0.2)
@@ -126,7 +127,7 @@ function getHumanReason(payload: BiometricPayload): string | null {
   const f = payload.features;
   if (payload.passed !== true) return null;
   if (f.speedVariance <= 0) return null;
-  if (payload.completionTimeMs <= 1000 || payload.completionTimeMs >= 45000) return null;
+  if (payload.completionTimeMs <= 1000 || payload.completionTimeMs >= 30000) return null;
   if (f.strokeCount < 3) return null;
   if (f.totalPoints <= 10) return null;
   if (f.eventFrequencyHz < 10 || f.eventFrequencyHz > 200) return null;
@@ -146,7 +147,7 @@ export function heuristicLabel(payload: BiometricPayload): HeuristicResult {
   if (!payload.passed) missing.push('not-passed');
   if (f.speedVariance <= 0) missing.push('no-speed-var');
   if (payload.completionTimeMs <= 1000) missing.push('too-fast');
-  if (payload.completionTimeMs >= 45000) missing.push('too-slow');
+  if (payload.completionTimeMs >= 30000) missing.push('too-slow');
   if (f.strokeCount < 3) missing.push(`strokes:${f.strokeCount}`);
   if (f.totalPoints <= 10) missing.push(`points:${f.totalPoints}`);
   if (f.eventFrequencyHz < 10) missing.push(`freq-low:${f.eventFrequencyHz.toFixed(1)}`);

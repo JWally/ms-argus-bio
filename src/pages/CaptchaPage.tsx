@@ -35,7 +35,7 @@ type AppState = 'loading' | 'idle' | 'active' | 'complete';
 
 const API_URL = import.meta.env.VITE_API_URL as string | undefined;
 
-const TIMEOUT_MS = 180_000;
+const TIMEOUT_MS = 30_000;
 
 // ── Glyph type ──────────────────────────────────────────────────────
 // The client no longer knows the character or modelIndex.
@@ -532,9 +532,12 @@ export default function CaptchaPage() {
     return () => clearTimeout(id);
   }, [retryMsg, handleReset]);
 
+  const remainingMs = TIMEOUT_MS - elapsedMs;
   const timerClass = [
     'timer',
     state === 'active' && 'timer-active',
+    state === 'active' && remainingMs <= 5_000 && 'timer-danger',
+    state === 'active' && remainingMs > 5_000 && remainingMs <= 10_000 && 'timer-warn',
     state === 'complete' && !finalResult?.timedOut && 'timer-success',
     state === 'complete' && finalResult?.timedOut && 'timer-fail',
   ]
@@ -564,7 +567,7 @@ export default function CaptchaPage() {
         <main>
           {state !== 'complete' && (
             <>
-              <div className={timerClass}>{formatTime(elapsedMs)}</div>
+              <div className={timerClass}>{formatTime(Math.max(0, TIMEOUT_MS - elapsedMs))}</div>
 
               <div className="challenge-digits">
                 <DotChallenge
