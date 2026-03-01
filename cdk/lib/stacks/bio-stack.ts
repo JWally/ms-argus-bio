@@ -455,14 +455,29 @@ export class BioStack extends Stack {
       target: route53.RecordTarget.fromAlias(new route53targets.CloudFrontTarget(siteDistribution)),
     });
 
-    // Deploy dist/ to S3
+    // Deploy dist/ to S3 — two deployments with different cache headers
     const distPath = path.join(__dirname, '../../../dist');
+
+    // Hashed assets (JS, CSS, fonts, images) — immutable, long-lived cache
     new s3deploy.BucketDeployment(this, 'DeployStaticSite', {
       sources: [s3deploy.Source.asset(distPath)],
       destinationBucket: siteBucket,
       distribution: siteDistribution,
       distributionPaths: ['/*'],
       memoryLimit: 2096,
+      exclude: ['index.html'],
+      cacheControl: [s3deploy.CacheControl.fromString('public, max-age=31536000, immutable')],
+    });
+
+    // HTML — no cache (always revalidate to pick up new deploys)
+    new s3deploy.BucketDeployment(this, 'DeployHtml', {
+      sources: [s3deploy.Source.asset(distPath)],
+      destinationBucket: siteBucket,
+      distribution: siteDistribution,
+      distributionPaths: ['/index.html'],
+      memoryLimit: 512,
+      exclude: ['*'],
+      include: ['index.html'],
       cacheControl: [s3deploy.CacheControl.fromString('public, max-age=0, must-revalidate')],
     });
 

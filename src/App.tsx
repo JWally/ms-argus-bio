@@ -1,12 +1,16 @@
+import { lazy, Suspense } from 'react';
 import { Routes, Route } from 'react-router-dom';
-import CaptchaPage from './pages/CaptchaPage';
-import TicTacToePage from './pages/TicTacToePage';
+
+const CaptchaPage = lazy(() => import('./pages/CaptchaPage'));
+const TicTacToePage = lazy(() => import('./pages/TicTacToePage'));
 
 export default function App() {
   return (
-    <Routes>
-      <Route path="/" element={<CaptchaPage />} />
-      <Route path="/t3" element={<TicTacToePage />} />
-    </Routes>
+    <Suspense>
+      <Routes>
+        <Route path="/" element={<CaptchaPage />} />
+        <Route path="/t3" element={<TicTacToePage />} />
+      </Routes>
+    </Suspense>
   );
 }
