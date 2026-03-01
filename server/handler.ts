@@ -623,12 +623,12 @@ async function handleClassify(event: APIGatewayProxyEventV2): Promise<APIGateway
     // 2. Heuristic must agree with kNN verdict (or cold-start with no neighbors)
     //    — prevents poisoned kNN from laundering bot submissions as "human"
     // 3. (near-duplicate check removed during training phase)
-    const heuristicAgrees = hResult.label === result.verdict;
-    const isColdStart = result.neighborCount === 0;
+    // const heuristicAgrees = hResult.label === result.verdict;
+    // const isColdStart = result.neighborCount === 0;
     if (
-      cachedPointCount < TRAINING_CAP &&
-      result.verdict !== 'uncertain' &&
-      (heuristicAgrees || isColdStart)
+      cachedPointCount < TRAINING_CAP
+      // && result.verdict !== 'uncertain'
+      // && (heuristicAgrees || isColdStart)
     ) {
       const pointId = crypto.randomUUID();
       await client.upsert(COLLECTION_NAME, {

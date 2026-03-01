@@ -79,7 +79,10 @@ function getBotReason(payload: BiometricPayload): string | null {
   // Using === true so missing/undefined field (old client JS) is also skipped.
   if (f.coalescedSupported === true && f.coalescedRatio === 0 && f.totalPoints > 20)
     return 'no-coalesced';
-  if ((f.coalescedSpoofedRatio ?? 0) > 0.1 && f.totalPoints > 20)
+  // Threshold at 25% — real touch devices can hit 10-15% from slow/stationary
+  // finger movements where coalesced events share rounded coordinates.
+  // Actual spoofers (patched getCoalescedEvents) hit 80-100%.
+  if ((f.coalescedSpoofedRatio ?? 0) > 0.25 && f.totalPoints > 20)
     return `coalesced-spoofed:${((f.coalescedSpoofedRatio ?? 0) * 100).toFixed(1)}%`;
   // Touch/pen with zero pressure variance = synthetic events, BUT only
   // when the browser actually reports non-zero pressure. iOS Safari reports
@@ -98,9 +101,8 @@ function getBotReason(payload: BiometricPayload): string | null {
   // zeroMovementRatio > 0.8: CDP-dispatched events never synthesize movementX/Y
   if ((f.zeroMovementRatio ?? -1) > 0.8 && f.totalPoints > 20)
     return `zeroMovement:${((f.zeroMovementRatio ?? 0) * 100).toFixed(0)}%`;
-  // avgPredictedCount === 0: real browsers always predict 1-3 events
-  if (f.avgPredictedCount !== undefined && f.avgPredictedCount === 0 && f.totalPoints > 30)
-    return 'no-predicted-events';
+  // avgPredictedCount: demoted to embedding-only signal (dim 87).
+  // Too many false positives across Firefox, Safari, and Linux Chrome (Wayland/X11).
   // avgTimestampDelta < 1ms: CDP events have near-zero delta
   if ((f.avgTimestampDelta ?? 999) < 1 && f.totalPoints > 20)
     return `timestampDelta:${(f.avgTimestampDelta ?? 0).toFixed(2)}ms`;
