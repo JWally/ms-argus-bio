@@ -17,6 +17,8 @@ export interface BiometricPayload {
   features: AggregateFeatures;
   /** APIs detected as tampered on the client (prototype lies) */
   tamperedApis?: string[];
+  /** VM integrity hash — XOR-fold of features + deploy secret */
+  vmHash?: string;
 }
 
 export interface DigitResult {
@@ -26,7 +28,7 @@ export interface DigitResult {
   timeMs: number;
   strokes: NormalizedStroke[];
   imageData: number[];
-  /** Full 26-element softmax distribution (letters A-Z). Used by T3 for confidence-based validation. */
+  /** Full 26-element softmax distribution (letters A-Z). */
   allConfidences?: number[];
 }
 
@@ -124,8 +126,6 @@ export type Label = 'human' | 'bot' | 'uncertain';
 
 export interface Verdict {
   verdict: Label;
-  confidence: number;
-  neighborCount: number;
   challengeId: string;
 }
 
@@ -176,6 +176,7 @@ export interface VerifyResponse {
 }
 
 export interface ClassifyResponse extends Verdict {
+  score?: number;
   token?: string;
   returnUrl?: string;
 }

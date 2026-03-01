@@ -2,7 +2,6 @@
 // Pure TypeScript CNN forward pass for EMNIST letter model.
 // Zero external dependencies — runs in Lambda without TF.js.
 //
-// Supports both 26-class (A-Z) and 15-class (T3 pool) models.
 // When a config.json exists in server/model/, uses its class mapping;
 // otherwise falls back to 26-class behavior.
 //

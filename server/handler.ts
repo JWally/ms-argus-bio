@@ -73,21 +73,6 @@ function generateServerChallenge(): ServerGlyph[] {
   return all;
 }
 
-const T3_NUM_TARGETS = 5; // max human turns in tic-tac-toe
-
-function generateT3Challenge(): ServerGlyph[] {
-  const glyphs: ServerGlyph[] = [];
-  const used = new Set<string>();
-  while (glyphs.length < T3_NUM_TARGETS) {
-    const g = SERVER_GLYPH_POOL[Math.floor(Math.random() * SERVER_GLYPH_POOL.length)];
-    if (!used.has(g.char)) {
-      used.add(g.char);
-      glyphs.push(g);
-    }
-  }
-  return glyphs;
-}
-
 /** Encrypt challenge glyphs + timestamp into an opaque token (AES-256-GCM).
  *  The client carries this blob and sends it back on classify.
  *  Only the server can decrypt it — client never sees the expected answer. */
@@ -448,7 +433,7 @@ async function parseAndAuth(
 
 async function handleChallenge(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
   const mode = event.queryStringParameters?.mode;
-  const glyphs = mode === 't3' ? generateT3Challenge() : generateServerChallenge();
+  const glyphs = generateServerChallenge();
   let challengeId = encryptChallenge(glyphs, Date.now(), mode);
 
   // Send dynamically generated 8-bit grayscale images instead of static glyph templates.
@@ -492,13 +477,17 @@ async function handleChallenge(event: APIGatewayProxyEventV2): Promise<APIGatewa
 const TOP_K = 5;
 
 /** Validate challenge answers against server-side ground truth.
- *  Returns null if valid, or a retry response if mismatched. */
-function validateChallengeAnswers(payload: BiometricPayload): APIGatewayProxyResultV2 | null {
+ *  Returns a retry response on mismatch, plus per-letter server confidence scores. */
+function validateChallengeAnswers(payload: BiometricPayload): {
+  retry: APIGatewayProxyResultV2 | null;
+  scores: number[];
+} {
   const decrypted = decryptChallenge(payload.challengeId, Date.now());
-  if (!decrypted) return null; // Non-challenge UUID — skip validation
+  if (!decrypted) return { retry: null, scores: [] }; // Non-challenge UUID — skip validation
 
   const { glyphs: expected, mode } = decrypted;
   const mismatches: string[] = [];
+  const scores: number[] = [];
   const checkLen = Math.min(expected.length, payload.digits.length);
 
   for (let i = 0; i < checkLen; i++) {
@@ -506,15 +495,17 @@ function validateChallengeAnswers(payload: BiometricPayload): APIGatewayProxyRes
     const digit = payload.digits[i];
     if (!digit) {
       mismatches.push(`glyph[${i}]: missing`);
+      scores.push(0);
       continue;
     }
-    // Server-side inference for ALL glyphs (CAPTCHA + T3)
     if (!digit.imageData || digit.imageData.length !== 784) {
       mismatches.push(`glyph[${i}]: missing or invalid imageData`);
+      scores.push(0);
       continue;
     }
     const result = inferLetter(digit.imageData);
     const serverConf = result.allConfidences[exp.modelIndex] ?? 0;
+    scores.push(serverConf);
 
     // Accept if expected letter is in model's top K predictions
     const indexed = result.allConfidences.map((c, idx) => ({ idx, c }));
@@ -529,20 +520,20 @@ function validateChallengeAnswers(payload: BiometricPayload): APIGatewayProxyRes
     }
   }
 
-  if (mismatches.length === 0) return null;
+  if (mismatches.length === 0) return { retry: null, scores };
 
   logger.info('Challenge answer mismatch — retry', {
     challengeId: payload.challengeId.slice(0, 30),
     mode: mode ?? 'captcha',
     mismatches,
   });
-  return jsonResponse(200, {
-    retry: true,
-    message:
-      mismatches.length === 1
-        ? 'One character was incorrect. Try again!'
-        : `${mismatches.length} characters were incorrect. Try again!`,
-  });
+  return {
+    retry: jsonResponse(200, {
+      retry: true,
+      message: 'Incorrect. Try again.',
+    }),
+    scores,
+  };
 }
 
 /** Parse the classify request body — encrypted (octet-stream) or plain JSON. */
@@ -586,7 +577,7 @@ async function handleClassify(event: APIGatewayProxyEventV2): Promise<APIGateway
     }
 
     // Server-side answer validation — returns retry response on mismatch
-    const retryResponse = validateChallengeAnswers(payload);
+    const { retry: retryResponse, scores } = validateChallengeAnswers(payload);
     if (retryResponse) return retryResponse;
 
     // Compute embedding
@@ -657,10 +648,14 @@ async function handleClassify(event: APIGatewayProxyEventV2): Promise<APIGateway
 
     const verdict: Verdict = {
       verdict: result.verdict,
-      confidence: Math.round(result.confidence * 1000) / 1000,
-      neighborCount: result.neighborCount,
       challengeId: payload.challengeId,
     };
+
+    // Score: average server-side EMNIST confidence (0-100)
+    const score =
+      scores.length > 0
+        ? Math.round((scores.reduce((s, v) => s + v, 0) / scores.length) * 100)
+        : undefined;
 
     metrics.addMetric('ClassifyLatencyMs', MetricUnit.Milliseconds, Date.now() - start);
     metrics.addMetric('ClassifyRequest', MetricUnit.Count, 1);
@@ -683,12 +678,18 @@ async function handleClassify(event: APIGatewayProxyEventV2): Promise<APIGateway
       passed: payload.passed,
       speedVariance: Math.round(payload.features.speedVariance * 10000) / 10000,
       timingCV: Math.round(timingCV(payload) * 1000) / 1000,
+      vmHash: payload.vmHash ?? 'missing',
     });
 
-    const response: ClassifyResponse & { heuristicLabel: string; heuristicReason: string } = {
+    // Mask bot verdict — return same retry response as wrong answers
+    // so bots can't distinguish detection from misrecognition
+    if (result.verdict === 'bot') {
+      return jsonResponse(200, { retry: true, message: 'Incorrect. Try again.' });
+    }
+
+    const response: ClassifyResponse = {
       ...verdict,
-      heuristicLabel: hResult.label,
-      heuristicReason: hResult.reason,
+      score,
     };
 
     // Session flow: create verification token and include returnUrl
@@ -704,7 +705,7 @@ async function handleClassify(event: APIGatewayProxyEventV2): Promise<APIGateway
         sessionId,
         session.merchantId,
         verdict.verdict,
-        verdict.confidence
+        Math.round(result.confidence * 1000) / 1000
       );
       await completeSession(sessionId);
 

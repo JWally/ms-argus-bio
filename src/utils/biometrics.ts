@@ -32,9 +32,7 @@ export interface ConfidenceSnapshot {
 
 export interface VerdictResult {
   verdict: 'human' | 'bot' | 'uncertain';
-  confidence: number;
-  neighborCount: number;
-  heuristicLabel: string;
+  score?: number;
   token?: string;
   returnUrl?: string;
 }

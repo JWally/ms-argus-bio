@@ -66,6 +66,11 @@ function getBotReason(payload: BiometricPayload): string | null {
   if (payload.tamperedApis && payload.tamperedApis.length > 0)
     return `tampered:${payload.tamperedApis.join(',')}`;
 
+  // ── VM hash validation ──
+  // If vmHash is present but empty/malformed → bytecode was tampered with
+  if (payload.vmHash !== undefined && payload.vmHash !== '' && !/^\d+$/.test(payload.vmHash))
+    return 'vm:invalid-hash';
+
   // ── Hard bot signals (any one triggers) ──
   if (payload.completionTimeMs < 500) return `fast:${payload.completionTimeMs}ms`;
   if (f.eventFrequencyHz > 300) return `freq:${f.eventFrequencyHz.toFixed(1)}Hz`;

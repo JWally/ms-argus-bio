@@ -12,6 +12,7 @@ import {
   type ConfidenceSnapshot,
   type VerdictResult,
 } from '../utils/biometrics';
+import { runTripwire, immolateFeatures } from '../vm/tripwire';
 import {
   buildClientImage,
   mask1bitTo8bit,
@@ -214,6 +215,9 @@ export default function CaptchaPage() {
   }, [fetchChallenge]);
 
   const logPayload = useCallback((totalTimeMs: number, timedOut: boolean) => {
+    const features = computeFeatures(allStrokesRef.current);
+    const tamperedApis = [...detectTampering(), ...detectCDP()];
+
     const payload = {
       challengeId: challengeIdRef.current || crypto.randomUUID(),
       // Don't leak expected answers — just send glyph count (all letters)
@@ -228,18 +232,30 @@ export default function CaptchaPage() {
       screenHeight: window.screen.height,
       devicePixelRatio: window.devicePixelRatio,
       userAgent: navigator.userAgent,
-      features: computeFeatures(allStrokesRef.current),
-      tamperedApis: [...detectTampering(), ...detectCDP()],
+      features,
+      tamperedApis,
+      vmHash: '' as string,
       ...(sessionIdRef.current ? { sessionId: sessionIdRef.current } : {}),
     };
+
+    // Run tripwire VM — async but fire-and-forget into the send pipeline
+    const tripwirePromise = runTripwire(allStrokesRef.current, features)
+      .then((tw) => {
+        if (tw.tampered) {
+          payload.features = immolateFeatures(features) as typeof features;
+          payload.tamperedApis.push(...tw.vmSignals);
+        }
+        payload.vmHash = tw.vmIntegrityHash;
+      })
+      .catch(() => {
+        /* VM failure is non-fatal */
+      });
+
     // eslint-disable-next-line no-console
-    console.log('[ARGUS BIO] Biometric Payload', payload);
+    void tripwirePromise.then(() => console.log('[ARGUS BIO] Biometric Payload', payload));
 
     const fallbackVerdict: VerdictResult = {
       verdict: 'uncertain',
-      confidence: 0,
-      neighborCount: 0,
-      heuristicLabel: 'no-api',
     };
 
     if (!API_URL) {
@@ -250,47 +266,50 @@ export default function CaptchaPage() {
     const ctrl = new AbortController();
     const timeout = setTimeout(() => ctrl.abort(), 10_000);
 
-    // Encrypt if we have ECDH keys, otherwise fall back to plain JSON
-    const canEncrypt = rawPublicKeyRef.current && serverPubKeyRef.current;
-    const sendRequest = canEncrypt
-      ? workerEncrypt(payload, serverPubKeyRef.current).then((encrypted) =>
-          fetch(`${API_URL}/v1/classify`, {
+    // Wait for tripwire to complete before sending (adds ~2-5ms)
+    tripwirePromise.then(() => {
+      // Encrypt if we have ECDH keys, otherwise fall back to plain JSON
+      const canEncrypt = rawPublicKeyRef.current && serverPubKeyRef.current;
+      const sendRequest = canEncrypt
+        ? workerEncrypt(payload, serverPubKeyRef.current).then((encrypted) =>
+            fetch(`${API_URL}/v1/classify`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/octet-stream',
+                'X-Canvas-Fp': rawPublicKeyRef.current,
+              },
+              body: encrypted.buffer as ArrayBuffer,
+              signal: ctrl.signal,
+            })
+          )
+        : fetch(`${API_URL}/v1/classify`, {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/octet-stream',
-              'X-Canvas-Fp': rawPublicKeyRef.current,
-            },
-            body: encrypted.buffer as ArrayBuffer,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
             signal: ctrl.signal,
-          })
-        )
-      : fetch(`${API_URL}/v1/classify`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-          signal: ctrl.signal,
-        });
+          });
 
-    sendRequest
-      .then((res) => res.json())
-      .then((v) => {
-        // eslint-disable-next-line no-console
-        console.log('[ARGUS BIO] Verdict', v);
-        if (v.retry) {
-          setRetryMsg(v.message || 'Incorrect. Try again!');
-          return;
-        }
-        const result = v as VerdictResult;
-        setVerdict(result);
-        if (result.token) setArgusToken(result.token);
-        if (result.returnUrl) setReturnUrl(result.returnUrl);
-      })
-      .catch((err) => {
-        // eslint-disable-next-line no-console
-        console.error('[ARGUS BIO] Classification error', err);
-        setVerdict(fallbackVerdict);
-      })
-      .finally(() => clearTimeout(timeout));
+      sendRequest
+        .then((res) => res.json())
+        .then((v) => {
+          // eslint-disable-next-line no-console
+          console.log('[ARGUS BIO] Verdict', v);
+          if (v.retry) {
+            setRetryMsg(v.message || 'Incorrect. Try again!');
+            return;
+          }
+          const result = v as VerdictResult;
+          setVerdict(result);
+          if (result.token) setArgusToken(result.token);
+          if (result.returnUrl) setReturnUrl(result.returnUrl);
+        })
+        .catch((err) => {
+          // eslint-disable-next-line no-console
+          console.error('[ARGUS BIO] Classification error', err);
+          setVerdict(fallbackVerdict);
+        })
+        .finally(() => clearTimeout(timeout));
+    }); // end tripwirePromise.then
   }, []);
 
   // Start game on first canvas touch

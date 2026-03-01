@@ -1,3 +1,4 @@
+import { execSync } from 'child_process';
 import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import JavaScriptObfuscator from 'javascript-obfuscator';
@@ -16,7 +17,8 @@ function obfuscatorPlugin(): Plugin {
       const isPageChunk =
         chunk.fileName.includes('CaptchaPage') ||
         chunk.fileName.includes('TicTacToePage') ||
-        chunk.fileName.includes('crypto');
+        chunk.fileName.includes('crypto') ||
+        chunk.fileName.includes('vm');
       if (!isPageChunk) return null;
 
       const result = JavaScriptObfuscator.obfuscate(code, {
@@ -38,9 +40,28 @@ function obfuscatorPlugin(): Plugin {
   };
 }
 
+/** Vite plugin that compiles tripwire bytecode before build starts. */
+function compileTripwirePlugin(): Plugin {
+  return {
+    name: 'vite-plugin-compile-tripwire',
+    apply: 'build',
+    buildStart() {
+      try {
+        execSync('npx tsx scripts/compile-tripwire.ts', {
+          cwd: import.meta.dirname,
+          stdio: 'inherit',
+        });
+      } catch (err) {
+        console.error('[compile-tripwire] Failed to compile tripwire bytecode:', err);
+        throw err;
+      }
+    },
+  };
+}
+
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), obfuscatorPlugin()],
+  plugins: [react(), compileTripwirePlugin(), obfuscatorPlugin()],
   build: {
     rollupOptions: {
       output: {

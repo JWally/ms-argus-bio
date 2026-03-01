@@ -11,9 +11,7 @@ import { formatTime } from './Leaderboard';
 
 interface VerdictResult {
   verdict: 'human' | 'bot' | 'uncertain';
-  confidence: number;
-  neighborCount: number;
-  heuristicLabel: string;
+  score?: number;
 }
 
 interface ResultDisplayProps {
@@ -113,15 +111,9 @@ export default function ResultDisplay({
                   <div className={`verdict-badge ${verdictCfg!.className}`}>
                     {verdictCfg!.label}
                   </div>
-                  <div className="verdict-confidence">
-                    {Math.round(verdict.confidence * 100)}% confidence
-                    {verdict.neighborCount > 0 && (
-                      <span className="verdict-neighbors">
-                        {' '}
-                        &middot; {verdict.neighborCount} neighbors
-                      </span>
-                    )}
-                  </div>
+                  {verdict.score != null && (
+                    <div className="verdict-confidence">Letter Quality: {verdict.score}%</div>
+                  )}
                 </>
               ) : (
                 <div className="verdict-loading">

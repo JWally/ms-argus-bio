@@ -259,7 +259,10 @@ describe('POST /v1/classify', () => {
     expect(result.statusCode).toBe(200);
     const body = parseBody(result) as Record<string, unknown>;
     expect(body.verdict).toBe('human');
-    expect(body.confidence).toBeDefined();
+    expect(body).not.toHaveProperty('confidence');
+    expect(body).not.toHaveProperty('neighborCount');
+    expect(body).not.toHaveProperty('heuristicLabel');
+    expect(body).not.toHaveProperty('heuristicReason');
     expect(body).not.toHaveProperty('token');
     expect(body).not.toHaveProperty('returnUrl');
   });
