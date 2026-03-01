@@ -46,6 +46,7 @@ export interface NormalizedStroke {
     movementY?: number;
     predictedCount?: number;
     timestampDelta?: number;
+    rawUpdateCount?: number;
   }[];
   startTime: number;
   endTime: number;
@@ -87,6 +88,36 @@ export interface AggregateFeatures {
   avgPredictedCount?: number;
   /** Average delta between performance.now() and event.timeStamp. Real: 4-16ms, CDP: ~0ms */
   avgTimestampDelta?: number;
+  /** Speed-curvature power law exponent. Human motor control: β ≈ 0.28-0.38 */
+  powerLawBeta?: number;
+  /** R² of the speed-curvature power law fit. Human: 0.3-0.7, Bot: < 0.15 */
+  powerLawR2?: number;
+  /** Variance of β across strokes */
+  powerLawBetaVar?: number;
+  /** Power ratio in 8-12 Hz tremor band. Human: 0.15-0.40, Bot: ~0.05 */
+  tremorRatio?: number;
+  /** Pearson correlation of pressure vs speed. Human touch: -0.2 to -0.6, Bot: ~0 */
+  pressureVelocityR?: number;
+  /** Velocity autocorrelation at lag 1. Human: 0.5-0.8, Bot: ~0 */
+  velocityAutoCorr1?: number;
+  /** Velocity autocorrelation at lag 2. Human: 0.2-0.5, Bot: ~0 */
+  velocityAutoCorr2?: number;
+  /** Velocity autocorrelation at lag 3 */
+  velocityAutoCorr3?: number;
+  /** Normalized position of peak speed (0-1). Human: 0.15-0.30, Bot: ~0.5 */
+  ballisticOnset?: number;
+  /** Log dimensionless jerk (smoothness). Lower = smoother = more human */
+  logDimensionlessJerk?: number;
+  /** Average velocity peaks per stroke. Human: 2-4, Bot: 0-1 or noisy */
+  subStrokeCount?: number;
+  /** Shannon entropy of movement direction histogram (16 bins) */
+  directionEntropy?: number;
+  /** Speed variance at endpoints / midstroke. Human < 1 (precise endpoints) */
+  endpointPrecisionRatio?: number;
+  /** Variance of contact area (width*height) over stroke. Touch: high, Mouse: 0 */
+  contactAreaDynamics?: number;
+  /** Average pointerrawupdate count per pointermove. Real: 2-15, Bot: 0 */
+  avgRawUpdateCount?: number;
 }
 
 export type Label = 'human' | 'bot' | 'uncertain';

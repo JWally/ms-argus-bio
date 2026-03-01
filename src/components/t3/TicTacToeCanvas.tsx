@@ -302,6 +302,7 @@ const TicTacToeCanvas = forwardRef<T3CanvasHandle, Props>(
     const richStrokesRef = useRef<Stroke[]>([]);
     const currentRichStrokeRef = useRef<StrokePoint[] | null>(null);
     const inputTypeRef = useRef('mouse');
+    const rawUpdateCountRef = useRef(0);
     // Celebration animation
     const celebrationStartRef = useRef<number | null>(null);
     const celebrationParticlesRef = useRef<Particle[]>([]);
@@ -465,6 +466,17 @@ const TicTacToeCanvas = forwardRef<T3CanvasHandle, Props>(
       return () => cancelAnimationFrame(celebrationRafRef.current);
     }, [winLine, winner]);
 
+    // Count pointerrawupdate events between pointermove dispatches (Chrome-only)
+    useEffect(() => {
+      const canvas = canvasRef.current;
+      if (!canvas || !('onpointerrawupdate' in canvas)) return;
+      const handler = () => {
+        rawUpdateCountRef.current++;
+      };
+      canvas.addEventListener('pointerrawupdate', handler, { passive: true });
+      return () => canvas.removeEventListener('pointerrawupdate', handler);
+    }, []);
+
     // ── Pointer events ───────────────────────────────────────────────
     const getCanvasPos = useCallback((e: React.PointerEvent): Point => {
       const canvas = canvasRef.current!;
@@ -510,7 +522,9 @@ const TicTacToeCanvas = forwardRef<T3CanvasHandle, Props>(
           movementY: 0,
           predictedCount: 0,
           timestampDelta: performance.now() - e.timeStamp,
+          rawUpdateCount: 0,
         };
+        rawUpdateCountRef.current = 0;
 
         // Cancel any active dissolve — user is drawing again
         if (dissolveStartRef.current !== null) {
@@ -584,7 +598,9 @@ const TicTacToeCanvas = forwardRef<T3CanvasHandle, Props>(
           movementY: e.movementY,
           predictedCount: (e.nativeEvent as PointerEvent).getPredictedEvents?.()?.length ?? 0,
           timestampDelta: performance.now() - e.timeStamp,
+          rawUpdateCount: rawUpdateCountRef.current,
         });
+        rawUpdateCountRef.current = 0;
         render();
       },
       [getCanvasPos, selectedCell, render]

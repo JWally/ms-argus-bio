@@ -16,6 +16,7 @@ export interface NormalizedStroke {
     movementY: number;
     predictedCount: number;
     timestampDelta: number;
+    rawUpdateCount: number;
   }[];
   startTime: number;
   endTime: number;
@@ -59,6 +60,63 @@ const variance = (a: number[]) => {
   const m = avg(a);
   return a.length ? a.reduce((s, v) => s + (v - m) ** 2, 0) / a.length : 0;
 };
+
+// ── Math helpers for motor-control features ─────────────────────────
+
+/** Linear regression: returns slope (β) and coefficient of determination (R²) */
+function linearRegression(xs: number[], ys: number[]): { slope: number; r2: number } {
+  const n = xs.length;
+  if (n < 3) return { slope: 0, r2: 0 };
+  const mx = avg(xs),
+    my = avg(ys);
+  let ssxy = 0,
+    ssxx = 0,
+    ssyy = 0;
+  for (let i = 0; i < n; i++) {
+    const dx = xs[i] - mx,
+      dy = ys[i] - my;
+    ssxy += dx * dy;
+    ssxx += dx * dx;
+    ssyy += dy * dy;
+  }
+  const slope = ssxx > 0 ? ssxy / ssxx : 0;
+  const r2 = ssxx > 0 && ssyy > 0 ? (ssxy * ssxy) / (ssxx * ssyy) : 0;
+  return { slope, r2 };
+}
+
+/** Pearson correlation coefficient between two arrays */
+function pearsonCorrelation(xs: number[], ys: number[]): number {
+  const n = Math.min(xs.length, ys.length);
+  if (n < 3) return 0;
+  const mx = avg(xs.slice(0, n)),
+    my = avg(ys.slice(0, n));
+  let sxy = 0,
+    sxx = 0,
+    syy = 0;
+  for (let i = 0; i < n; i++) {
+    const dx = xs[i] - mx,
+      dy = ys[i] - my;
+    sxy += dx * dy;
+    sxx += dx * dx;
+    syy += dy * dy;
+  }
+  const denom = Math.sqrt(sxx * syy);
+  return denom > 0 ? sxy / denom : 0;
+}
+
+/** Spectral power at a specific frequency for a uniformly-sampled signal */
+function spectralPowerAt(signal: number[], freqHz: number, sampleRateHz: number): number {
+  const N = signal.length;
+  if (N === 0) return 0;
+  let re = 0,
+    im = 0;
+  for (let n = 0; n < N; n++) {
+    const phase = (2 * Math.PI * freqHz * n) / sampleRateHz;
+    re += signal[n] * Math.cos(phase);
+    im -= signal[n] * Math.sin(phase);
+  }
+  return (re * re + im * im) / (N * N);
+}
 
 /** Compute per-point speeds and accelerations across all strokes */
 function computeKinematics(strokes: Stroke[]) {
@@ -147,6 +205,324 @@ function computeVelocityBellScore(strokes: Stroke[]): number {
   return bellCount > 0 ? bellScoreSum / bellCount : 0;
 }
 
+// ── Motor-control feature computations ──────────────────────────────
+
+/** Speed-curvature power law: V = k × R^β (2/3 power law of movement).
+ *  Human motor control produces β ≈ 0.28-0.38. Bots with independent timing: β ≈ 0-0.15.
+ *  Returns per-stroke betas, overall beta, R², and variance. */
+function computePowerLaw(strokes: Stroke[]): { beta: number; r2: number; betaVar: number } {
+  const allLogV: number[] = [];
+  const allLogR: number[] = [];
+  const perStrokeBetas: number[] = [];
+
+  for (const stroke of strokes) {
+    const pts = stroke.points;
+    const strokeLogV: number[] = [];
+    const strokeLogR: number[] = [];
+    for (let i = 1; i < pts.length - 1; i++) {
+      const dt = pts[i + 1].t - pts[i].t;
+      if (dt < 1) continue;
+      const dx1 = pts[i].x - pts[i - 1].x,
+        dy1 = pts[i].y - pts[i - 1].y;
+      const dx2 = pts[i + 1].x - pts[i].x,
+        dy2 = pts[i + 1].y - pts[i].y;
+      const speed = Math.sqrt(dx2 * dx2 + dy2 * dy2) / dt;
+      const cross = Math.abs(dx1 * dy2 - dy1 * dx2);
+      const l1 = Math.sqrt(dx1 * dx1 + dy1 * dy1);
+      const l2 = Math.sqrt(dx2 * dx2 + dy2 * dy2);
+      if (l1 < 0.5 || l2 < 0.5 || speed < 0.01) continue;
+      const curvature = cross / (l1 * l2);
+      if (curvature > 0.001) {
+        const lv = Math.log(speed);
+        const lr = Math.log(1 / curvature);
+        strokeLogV.push(lv);
+        strokeLogR.push(lr);
+        allLogV.push(lv);
+        allLogR.push(lr);
+      }
+    }
+    if (strokeLogV.length >= 3) {
+      perStrokeBetas.push(linearRegression(strokeLogR, strokeLogV).slope);
+    }
+  }
+
+  const overall = linearRegression(allLogR, allLogV);
+  return {
+    beta: overall.slope,
+    r2: overall.r2,
+    betaVar: variance(perStrokeBetas),
+  };
+}
+
+/** Tremor spectral ratio: power in 8-12 Hz / total power (1-20 Hz).
+ *  Human physiological tremor peaks at 8-12 Hz.
+ *  Bot Gaussian noise has flat spectrum. */
+function computeTremorRatio(strokes: Stroke[]): number {
+  // Collect timestamped speeds
+  const samples: { t: number; v: number }[] = [];
+  for (const stroke of strokes) {
+    for (let i = 1; i < stroke.points.length; i++) {
+      const dt = stroke.points[i].t - stroke.points[i - 1].t;
+      if (dt < 1) continue;
+      const dx = stroke.points[i].x - stroke.points[i - 1].x;
+      const dy = stroke.points[i].y - stroke.points[i - 1].y;
+      samples.push({
+        t: stroke.points[i].t,
+        v: Math.sqrt(dx * dx + dy * dy) / dt,
+      });
+    }
+  }
+  if (samples.length < 20) return 0;
+
+  // Resample to uniform 100 Hz via linear interpolation
+  const SAMPLE_RATE = 100;
+  const tStart = samples[0].t;
+  const tEnd = samples[samples.length - 1].t;
+  const duration = tEnd - tStart;
+  if (duration < 100) return 0; // need at least 100ms
+  const uniformCount = Math.min(Math.floor((duration / 1000) * SAMPLE_RATE), 512);
+  if (uniformCount < 20) return 0;
+  const uniform: number[] = [];
+  let si = 0;
+  for (let i = 0; i < uniformCount; i++) {
+    const t = tStart + (i * 1000) / SAMPLE_RATE;
+    while (si < samples.length - 1 && samples[si + 1].t < t) si++;
+    if (si >= samples.length - 1) {
+      uniform.push(samples[samples.length - 1].v);
+    } else {
+      const frac = (t - samples[si].t) / (samples[si + 1].t - samples[si].t);
+      uniform.push(samples[si].v * (1 - frac) + samples[si + 1].v * frac);
+    }
+  }
+
+  // Remove mean (DC component)
+  const mean = avg(uniform);
+  const centered = uniform.map((v) => v - mean);
+
+  // Compute spectral power at 1-20 Hz
+  let totalPower = 0;
+  let tremorPower = 0;
+  for (let f = 1; f <= 20; f++) {
+    const p = spectralPowerAt(centered, f, SAMPLE_RATE);
+    totalPower += p;
+    if (f >= 8 && f <= 12) tremorPower += p;
+  }
+  return totalPower > 0 ? tremorPower / totalPower : 0;
+}
+
+/** Pressure-velocity anti-correlation.
+ *  Humans press harder in curves (slow) and lighter on straight segments (fast) → r ≈ -0.3 to -0.6.
+ *  Bots have no pressure-velocity coupling → r ≈ 0. */
+function computePressureVelocityR(strokes: Stroke[]): number {
+  const pressures: number[] = [];
+  const speeds: number[] = [];
+  for (const stroke of strokes) {
+    for (let i = 1; i < stroke.points.length; i++) {
+      const dt = stroke.points[i].t - stroke.points[i - 1].t;
+      if (dt < 1) continue;
+      const dx = stroke.points[i].x - stroke.points[i - 1].x;
+      const dy = stroke.points[i].y - stroke.points[i - 1].y;
+      speeds.push(Math.sqrt(dx * dx + dy * dy) / dt);
+      pressures.push(stroke.points[i].pressure);
+    }
+  }
+  return pearsonCorrelation(pressures, speeds);
+}
+
+/** Velocity autocorrelation at lags 1, 2, 3.
+ *  Human movements are temporally smooth (lag-1 r ≈ 0.5-0.8).
+ *  Bot IID timing produces near-zero autocorrelation. */
+function computeVelocityAutocorrelation(strokes: Stroke[]): [number, number, number] {
+  const speeds: number[] = [];
+  for (const stroke of strokes) {
+    for (let i = 1; i < stroke.points.length; i++) {
+      const dt = stroke.points[i].t - stroke.points[i - 1].t;
+      if (dt < 1) continue;
+      const dx = stroke.points[i].x - stroke.points[i - 1].x;
+      const dy = stroke.points[i].y - stroke.points[i - 1].y;
+      speeds.push(Math.sqrt(dx * dx + dy * dy) / dt);
+    }
+  }
+  if (speeds.length < 6) return [0, 0, 0];
+  const mean = avg(speeds);
+  const denom = speeds.reduce((s, v) => s + (v - mean) ** 2, 0);
+  if (denom === 0) return [0, 0, 0];
+  const result: [number, number, number] = [0, 0, 0];
+  for (let lag = 1; lag <= 3; lag++) {
+    let num = 0;
+    for (let i = 0; i < speeds.length - lag; i++) {
+      num += (speeds[i] - mean) * (speeds[i + lag] - mean);
+    }
+    result[lag - 1] = num / denom;
+  }
+  return result;
+}
+
+/** Ballistic onset: normalized position of peak speed within each stroke.
+ *  Humans peak early (0.15-0.30). Bots peak anywhere (~0.4-0.6). */
+function computeBallisticOnset(strokes: Stroke[]): number {
+  const peaks: number[] = [];
+  for (const stroke of strokes) {
+    if (stroke.points.length < 5) continue;
+    let maxSpeed = 0,
+      maxIdx = 0;
+    for (let i = 1; i < stroke.points.length; i++) {
+      const dt = stroke.points[i].t - stroke.points[i - 1].t;
+      if (dt < 1) continue;
+      const dx = stroke.points[i].x - stroke.points[i - 1].x;
+      const dy = stroke.points[i].y - stroke.points[i - 1].y;
+      const speed = Math.sqrt(dx * dx + dy * dy) / dt;
+      if (speed > maxSpeed) {
+        maxSpeed = speed;
+        maxIdx = i;
+      }
+    }
+    if (maxSpeed > 0) peaks.push(maxIdx / stroke.points.length);
+  }
+  return avg(peaks);
+}
+
+/** Log dimensionless jerk — standard smoothness metric (Balasubramanian 2012).
+ *  LDLJ = log(√(∫jerk²dt × T⁵ / L²)). Lower = smoother = more human. */
+function computeLogDimensionlessJerk(strokes: Stroke[]): number {
+  let totalJerkSq = 0,
+    totalPathLen = 0,
+    totalDuration = 0;
+  for (const stroke of strokes) {
+    const pts = stroke.points;
+    if (pts.length < 4) continue;
+    const T = pts[pts.length - 1].t - pts[0].t;
+    if (T < 10) continue;
+
+    let pathLen = 0;
+    const speeds: { s: number; t: number }[] = [];
+    for (let i = 1; i < pts.length; i++) {
+      const dx = pts[i].x - pts[i - 1].x,
+        dy = pts[i].y - pts[i - 1].y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      pathLen += dist;
+      const dt = pts[i].t - pts[i - 1].t;
+      if (dt > 0) speeds.push({ s: dist / dt, t: pts[i].t });
+    }
+    if (pathLen < 1 || speeds.length < 3) continue;
+
+    // Compute jerk² integral (finite differences)
+    let jerkSqInt = 0;
+    for (let i = 1; i < speeds.length - 1; i++) {
+      const dt1 = speeds[i].t - speeds[i - 1].t;
+      const dt2 = speeds[i + 1].t - speeds[i].t;
+      if (dt1 < 1 || dt2 < 1) continue;
+      const a1 = (speeds[i].s - speeds[i - 1].s) / dt1;
+      const a2 = (speeds[i + 1].s - speeds[i].s) / dt2;
+      const dtAvg = (dt1 + dt2) / 2;
+      const jerk = (a2 - a1) / dtAvg;
+      jerkSqInt += jerk * jerk * dtAvg;
+    }
+
+    totalJerkSq += jerkSqInt;
+    totalPathLen += pathLen;
+    totalDuration += T;
+  }
+  if (totalPathLen < 1 || totalDuration < 10) return 0;
+  const dimensionless = (totalJerkSq * Math.pow(totalDuration, 5)) / (totalPathLen * totalPathLen);
+  return Math.log(Math.sqrt(dimensionless) + 1);
+}
+
+/** Sub-stroke count: average velocity peaks per stroke.
+ *  Humans produce 2-4 sub-movements. Bots produce 0-1 or noisy 5+. */
+function computeSubStrokeCount(strokes: Stroke[]): number {
+  let totalPeaks = 0,
+    strokeCount = 0;
+  for (const stroke of strokes) {
+    if (stroke.points.length < 5) continue;
+    // Compute smoothed speed profile
+    const speeds: number[] = [];
+    for (let i = 1; i < stroke.points.length; i++) {
+      const dt = stroke.points[i].t - stroke.points[i - 1].t;
+      if (dt < 1) {
+        speeds.push(0);
+        continue;
+      }
+      const dx = stroke.points[i].x - stroke.points[i - 1].x;
+      const dy = stroke.points[i].y - stroke.points[i - 1].y;
+      speeds.push(Math.sqrt(dx * dx + dy * dy) / dt);
+    }
+    // Moving average (window 3)
+    const smoothed: number[] = [];
+    for (let i = 0; i < speeds.length; i++) {
+      const lo = Math.max(0, i - 1),
+        hi = Math.min(speeds.length - 1, i + 1);
+      let sum = 0;
+      for (let j = lo; j <= hi; j++) sum += speeds[j];
+      smoothed.push(sum / (hi - lo + 1));
+    }
+    // Count local maxima
+    let peaks = 0;
+    for (let i = 1; i < smoothed.length - 1; i++) {
+      if (smoothed[i] > smoothed[i - 1] && smoothed[i] > smoothed[i + 1]) peaks++;
+    }
+    totalPeaks += peaks;
+    strokeCount++;
+  }
+  return strokeCount > 0 ? totalPeaks / strokeCount : 0;
+}
+
+/** Direction angle entropy: Shannon entropy of movement direction histogram (16 bins).
+ *  Humans have directional preferences. Bots with Gaussian noise are more uniform. */
+function computeDirectionEntropy(strokes: Stroke[]): number {
+  const BINS = 16;
+  const bins = new Array(BINS).fill(0);
+  let total = 0;
+  for (const stroke of strokes) {
+    for (let i = 1; i < stroke.points.length; i++) {
+      const dx = stroke.points[i].x - stroke.points[i - 1].x;
+      const dy = stroke.points[i].y - stroke.points[i - 1].y;
+      if (Math.abs(dx) < 0.01 && Math.abs(dy) < 0.01) continue;
+      let angle = Math.atan2(dy, dx); // -PI to PI
+      if (angle < 0) angle += 2 * Math.PI; // 0 to 2PI
+      const bin = Math.min(BINS - 1, Math.floor((angle / (2 * Math.PI)) * BINS));
+      bins[bin]++;
+      total++;
+    }
+  }
+  if (total === 0) return 0;
+  let entropy = 0;
+  for (const count of bins) {
+    if (count > 0) {
+      const p = count / total;
+      entropy -= p * Math.log2(p);
+    }
+  }
+  return entropy;
+}
+
+/** Endpoint precision ratio: position variance at stroke endpoints vs midstroke.
+ *  Humans are precise at endpoints. Bots have uniform noise. */
+function computeEndpointPrecisionRatio(strokes: Stroke[]): number {
+  const endpointSpeeds: number[] = [];
+  const midSpeeds: number[] = [];
+  for (const stroke of strokes) {
+    if (stroke.points.length < 10) continue;
+    const n = stroke.points.length;
+    const threshold = Math.max(1, Math.floor(n * 0.15));
+    for (let i = 1; i < n; i++) {
+      const dt = stroke.points[i].t - stroke.points[i - 1].t;
+      if (dt < 1) continue;
+      const dx = stroke.points[i].x - stroke.points[i - 1].x;
+      const dy = stroke.points[i].y - stroke.points[i - 1].y;
+      const speed = Math.sqrt(dx * dx + dy * dy) / dt;
+      if (i < threshold || i >= n - threshold) {
+        endpointSpeeds.push(speed);
+      } else {
+        midSpeeds.push(speed);
+      }
+    }
+  }
+  const endVar = variance(endpointSpeeds);
+  const midVar = variance(midSpeeds);
+  return midVar > 0 ? endVar / midVar : 0;
+}
+
 /** Coalesced event stats: ratio of moves with coalesced events, and spoofed ratio */
 function computeCoalescedStats(allPoints: StrokePoint[]) {
   const movePoints = allPoints.slice(1); // skip first point (pointerdown)
@@ -182,6 +558,22 @@ const EMPTY_FEATURES = {
   zeroMovementRatio: 0,
   avgPredictedCount: 0,
   avgTimestampDelta: 0,
+  // Motor-control features
+  powerLawBeta: 0,
+  powerLawR2: 0,
+  powerLawBetaVar: 0,
+  tremorRatio: 0,
+  pressureVelocityR: 0,
+  velocityAutoCorr1: 0,
+  velocityAutoCorr2: 0,
+  velocityAutoCorr3: 0,
+  ballisticOnset: 0,
+  logDimensionlessJerk: 0,
+  subStrokeCount: 0,
+  directionEntropy: 0,
+  endpointPrecisionRatio: 0,
+  contactAreaDynamics: 0,
+  avgRawUpdateCount: 0,
 };
 
 export function computeFeatures(strokes: Stroke[]) {
@@ -222,6 +614,13 @@ export function computeFeatures(strokes: Stroke[]) {
   // avgTimestampDelta: avg (performance.now() - event.timeStamp). Real: 4-16ms. CDP: ~0ms.
   const avgTimestampDelta = avg(allPoints.map((p) => p.timestampDelta));
 
+  // ── Motor-control features ──
+  const powerLaw = computePowerLaw(strokes);
+  const [velocityAutoCorr1, velocityAutoCorr2, velocityAutoCorr3] =
+    computeVelocityAutocorrelation(strokes);
+  const contactAreas = allPoints.map((p) => p.width * p.height);
+  const avgRawUpdateCount = avg(movePoints.map((p) => p.rawUpdateCount));
+
   return {
     strokeCount: strokes.length,
     totalPoints: allPoints.length,
@@ -244,6 +643,22 @@ export function computeFeatures(strokes: Stroke[]) {
     zeroMovementRatio,
     avgPredictedCount,
     avgTimestampDelta,
+    // Motor-control features
+    powerLawBeta: powerLaw.beta,
+    powerLawR2: powerLaw.r2,
+    powerLawBetaVar: powerLaw.betaVar,
+    tremorRatio: computeTremorRatio(strokes),
+    pressureVelocityR: computePressureVelocityR(strokes),
+    velocityAutoCorr1,
+    velocityAutoCorr2,
+    velocityAutoCorr3,
+    ballisticOnset: computeBallisticOnset(strokes),
+    logDimensionlessJerk: computeLogDimensionlessJerk(strokes),
+    subStrokeCount: computeSubStrokeCount(strokes),
+    directionEntropy: computeDirectionEntropy(strokes),
+    endpointPrecisionRatio: computeEndpointPrecisionRatio(strokes),
+    contactAreaDynamics: variance(contactAreas),
+    avgRawUpdateCount,
   };
 }
 
@@ -571,6 +986,7 @@ export function normalizeStrokes(
       movementY: p.movementY,
       predictedCount: p.predictedCount,
       timestampDelta: p.timestampDelta,
+      rawUpdateCount: p.rawUpdateCount,
     })),
     startTime: s.startTime - startTime,
     endTime: s.endTime - startTime,

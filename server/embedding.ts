@@ -1,10 +1,10 @@
 // server/embedding.ts
-// BiometricPayload → 70d vector encoding
+// BiometricPayload → 88d vector encoding
 
 import type { BiometricPayload, NormalizedStroke } from './types';
 import { timingCV } from './heuristics';
 
-const EMBEDDING_DIMS = 73;
+const EMBEDDING_DIMS = 88;
 
 /** Clamp value to [0, 1] after min-max normalization */
 function norm(value: number, min: number, max: number): number {
@@ -368,6 +368,64 @@ export function encode(payload: BiometricPayload): number[] {
   // Real browsers: 4-16ms. CDP synthetic events: ~0ms.
   vec.push(norm(f.avgTimestampDelta ?? 0, 0, 30));
 
+  // ── Dims 73-87: Motor-control features (15d) ──
+
+  // Dim 73: Speed-curvature power law β.
+  // Human motor cortex produces β ≈ 0.28-0.38 (2/3 power law).
+  // Bots with independent timing produce β ≈ 0-0.15.
+  vec.push(norm(f.powerLawBeta ?? 0, -0.5, 1));
+
+  // Dim 74: Power law R² (goodness of fit).
+  // Human: 0.3-0.7, Bot: < 0.15 (weak/no coupling).
+  vec.push(norm(f.powerLawR2 ?? 0, 0, 1));
+
+  // Dim 75: Power law β variance across strokes.
+  // Consistent β across strokes = human. Wild variance = noise.
+  vec.push(norm(f.powerLawBetaVar ?? 0, 0, 0.5));
+
+  // Dim 76: Tremor spectral ratio (8-12 Hz power / total power).
+  // Human physiological tremor: 0.15-0.40. Bot white noise: ~0.05.
+  vec.push(norm(f.tremorRatio ?? 0, 0, 0.6));
+
+  // Dim 77: Pressure-velocity Pearson correlation.
+  // Human touch: -0.2 to -0.6 (press harder in curves). Bot: ~0.
+  // Shifted to [0,1] range: -1 maps to 0, +1 maps to 1.
+  vec.push(norm(f.pressureVelocityR ?? 0, -1, 1));
+
+  // Dims 78-80: Velocity autocorrelation at lags 1, 2, 3.
+  // Human: lag-1 ≈ 0.5-0.8 (smooth trajectories). Bot: ~0.0-0.2 (IID timing).
+  vec.push(norm(f.velocityAutoCorr1 ?? 0, -0.5, 1));
+  vec.push(norm(f.velocityAutoCorr2 ?? 0, -0.5, 1));
+  vec.push(norm(f.velocityAutoCorr3 ?? 0, -0.5, 1));
+
+  // Dim 81: Ballistic onset — normalized peak speed position [0, 1].
+  // Humans peak early (0.15-0.30). Bots peak anywhere (~0.5).
+  vec.push(norm(f.ballisticOnset ?? 0.5, 0, 1));
+
+  // Dim 82: Log dimensionless jerk (smoothness metric).
+  // Lower = smoother = more human. Bot random pauses inject high jerk.
+  vec.push(norm(f.logDimensionlessJerk ?? 0, 0, 30));
+
+  // Dim 83: Sub-stroke velocity peak count (avg per stroke).
+  // Humans: 2-4 sub-movements. Bots: 0-1 or noisy 5+.
+  vec.push(norm(f.subStrokeCount ?? 0, 0, 8));
+
+  // Dim 84: Direction angle entropy (16-bin histogram).
+  // Max entropy = log2(16) = 4. Higher = more uniform.
+  vec.push(norm(f.directionEntropy ?? 0, 0, 4));
+
+  // Dim 85: Endpoint precision ratio (endpoint speed var / midstroke speed var).
+  // Humans: < 1 (precise at endpoints). Bots: ~1 (uniform noise).
+  vec.push(norm(f.endpointPrecisionRatio ?? 1, 0, 3));
+
+  // Dim 86: Contact area dynamics (variance of width*height).
+  // Touch: high variance (finger geometry changes). Mouse/Bot: 0.
+  vec.push(norm(f.contactAreaDynamics ?? 0, 0, 500));
+
+  // Dim 87: Average pointerrawupdate count per pointermove.
+  // Real hardware: 2-15+ (compositor-level events). CDP: 0.
+  vec.push(norm(f.avgRawUpdateCount ?? 0, 0, 20));
+
   // Sanity check
   if (vec.length !== EMBEDDING_DIMS) {
     throw new Error(`Embedding dimension mismatch: expected ${EMBEDDING_DIMS}, got ${vec.length}`);
@@ -376,5 +434,5 @@ export function encode(payload: BiometricPayload): number[] {
   return vec;
 }
 
-export const EMBEDDING_VERSION = 'v6';
+export const EMBEDDING_VERSION = 'v7';
 export { EMBEDDING_DIMS };

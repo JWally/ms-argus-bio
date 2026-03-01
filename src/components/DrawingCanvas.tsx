@@ -23,6 +23,8 @@ export interface StrokePoint {
   predictedCount: number;
   /** Delta between performance.now() and event.timeStamp. Real: 4-16ms, CDP: ~0ms */
   timestampDelta: number;
+  /** Number of pointerrawupdate events since last pointermove. Real: 2-15+, CDP: 0 */
+  rawUpdateCount: number;
 }
 
 export interface Stroke {
@@ -47,6 +49,7 @@ const DrawingCanvas = forwardRef<CanvasHandle, Props>(({ disabled }, ref) => {
   const strokesRef = useRef<Stroke[]>([]);
   const currentStrokeRef = useRef<Stroke | null>(null);
   const inputTypeRef = useRef('mouse');
+  const rawUpdateCountRef = useRef(0);
 
   useImperativeHandle(ref, () => ({
     getCanvas: () => canvasRef.current,
@@ -87,6 +90,19 @@ const DrawingCanvas = forwardRef<CanvasHandle, Props>(({ disabled }, ref) => {
     return () => ro.disconnect();
   }, []);
 
+  // Count pointerrawupdate events between pointermove dispatches.
+  // Real hardware fires at 125-1000Hz; CDP-dispatched events produce 0.
+  // Chrome-only (feature-detected) — other browsers simply get 0.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !('onpointerrawupdate' in canvas)) return;
+    const handler = () => {
+      rawUpdateCountRef.current++;
+    };
+    canvas.addEventListener('pointerrawupdate', handler, { passive: true });
+    return () => canvas.removeEventListener('pointerrawupdate', handler);
+  }, []);
+
   const getPos = useCallback((e: React.PointerEvent) => {
     const canvas = canvasRef.current!;
     const rect = canvas.getBoundingClientRect();
@@ -118,7 +134,9 @@ const DrawingCanvas = forwardRef<CanvasHandle, Props>(({ disabled }, ref) => {
         movementY: 0,
         predictedCount: 0,
         timestampDelta: performance.now() - e.timeStamp,
+        rawUpdateCount: 0, // pointerdown is a single event
       };
+      rawUpdateCountRef.current = 0; // reset counter for upcoming moves
       currentStrokeRef.current = {
         points: [point],
         startTime: point.t,
@@ -152,7 +170,9 @@ const DrawingCanvas = forwardRef<CanvasHandle, Props>(({ disabled }, ref) => {
         movementY: e.movementY,
         predictedCount: (e.nativeEvent as PointerEvent).getPredictedEvents?.()?.length ?? 0,
         timestampDelta: performance.now() - e.timeStamp,
+        rawUpdateCount: rawUpdateCountRef.current,
       };
+      rawUpdateCountRef.current = 0; // reset for next pointermove
       currentStrokeRef.current.points.push(point);
       currentStrokeRef.current.endTime = point.t;
 
