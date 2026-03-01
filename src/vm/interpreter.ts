@@ -1,4 +1,4 @@
-/** Mini VM interpreter — synchronous-only dispatch loop */
+/** Mini VM interpreter — sync + async dispatch loops */
 
 import { decodeInstruction } from './format';
 import { Op, hasOperand } from './opcodes';
@@ -32,6 +32,25 @@ export function execute(
   return run(vm);
 }
 
+/** Execute a bytecode module, supporting async operations */
+export async function executeAsync(
+  module: BytecodeModule,
+  bridge?: ApiBridge,
+  args?: unknown[]
+): Promise<ExecutionResult> {
+  const vm = new MiniVM(module);
+  if (bridge) vm.bridge = bridge;
+
+  if (args) {
+    for (let i = 0; i < args.length && i < 7; i++) {
+      vm.registers[i + 1] = args[i];
+    }
+  }
+
+  vm.status = VMStatus.RUNNING;
+  return runAsync(vm);
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type R = any;
 
@@ -52,6 +71,36 @@ function run(vm: MiniVM): ExecutionResult {
     }
 
     dispatch(vm, opcode, dst, src1, src2, operand, reg, strings, numbers, apiTable);
+  }
+
+  if (vm.pc >= code.length && vm.status === VMStatus.RUNNING) {
+    vm.status = VMStatus.HALTED;
+  }
+
+  return { value: reg[0], instructionsExecuted: ic };
+}
+
+async function runAsync(vm: MiniVM): Promise<ExecutionResult> {
+  const { registers: reg, module } = vm;
+  const { code, strings, numbers, apiTable } = module;
+  let ic = 0;
+
+  while (vm.status === VMStatus.RUNNING && vm.pc < code.length) {
+    if (++ic > MAX_INSTRUCTIONS) throw new Error('Execution limit exceeded');
+
+    const word = code[vm.pc];
+    const { opcode, dst, src1, src2 } = decodeInstruction(word);
+
+    let operand = 0;
+    if (hasOperand(opcode)) {
+      operand = code[vm.pc + 1];
+    }
+
+    if (opcode === Op.API_CALL_ASYNC) {
+      await dispatchAsync(vm, opcode, dst, src1, src2, operand, reg, apiTable);
+    } else {
+      dispatch(vm, opcode, dst, src1, src2, operand, reg, strings, numbers, apiTable);
+    }
   }
 
   if (vm.pc >= code.length && vm.status === VMStatus.RUNNING) {
@@ -141,6 +190,10 @@ function dispatch(
       vm.pc += 2;
       break;
     }
+    case Op.API_CALL_ASYNC:
+      throw new Error(
+        `Async opcode 0x${opcode.toString(16)} in synchronous execution. Use executeAsync().`
+      );
 
     // === Arithmetic ===
     case Op.ADD:
@@ -361,5 +414,33 @@ function dispatch(
 
     default:
       throw new Error(`Unknown opcode: 0x${opcode.toString(16)} at PC=${vm.pc}`);
+  }
+}
+
+// eslint-disable-next-line max-params -- mirrors dispatch() signature for consistency
+async function dispatchAsync(
+  vm: MiniVM,
+  opcode: number,
+  dst: number,
+  src1: number,
+  src2: number,
+  operand: number,
+  reg: unknown[],
+  apiTable: { apiId: number; nameIdx: number }[]
+): Promise<void> {
+  switch (opcode) {
+    case Op.API_CALL_ASYNC: {
+      const entry = apiTable[operand];
+      const argc = src2;
+      const args: unknown[] = [];
+      for (let i = 0; i < argc; i++) {
+        args.push(reg[1 + i]);
+      }
+      reg[dst] = await vm.bridge!.call(entry.apiId, reg[src1], args);
+      vm.pc += 2;
+      break;
+    }
+    default:
+      throw new Error(`Unhandled async opcode: 0x${opcode.toString(16)}`);
   }
 }

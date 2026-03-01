@@ -12,7 +12,7 @@ import {
   type ConfidenceSnapshot,
   type VerdictResult,
 } from '../utils/biometrics';
-import { runTripwire, immolateFeatures } from '../vm/tripwire';
+import { runTripwire, type TripwireResult } from '../vm/tripwire';
 import {
   buildClientImage,
   mask1bitTo8bit,
@@ -238,18 +238,20 @@ export default function CaptchaPage() {
       ...(sessionIdRef.current ? { sessionId: sessionIdRef.current } : {}),
     };
 
-    // Run tripwire VM — async but fire-and-forget into the send pipeline
-    const tripwirePromise = runTripwire(allStrokesRef.current, features)
-      .then((tw) => {
-        if (tw.tampered) {
-          payload.features = immolateFeatures(features) as typeof features;
-          payload.tamperedApis.push(...tw.vmSignals);
-        }
-        payload.vmHash = tw.vmIntegrityHash;
+    // Run tripwire VM with payload + serverPubKey for pristine ECDH encryption.
+    // The bridge modifies `payload` in-place (sets vmHash, immolates if tampered).
+    const tripwirePromise = runTripwire(
+      allStrokesRef.current,
+      features,
+      payload as Record<string, unknown>,
+      serverPubKeyRef.current || undefined
+    ).catch(
+      (): TripwireResult => ({
+        tampered: false,
+        vmSignals: [],
+        vmIntegrityHash: '',
       })
-      .catch(() => {
-        /* VM failure is non-fatal */
-      });
+    );
 
     // eslint-disable-next-line no-console
     void tripwirePromise.then(() => console.log('[ARGUS BIO] Biometric Payload', payload));
@@ -266,28 +268,43 @@ export default function CaptchaPage() {
     const ctrl = new AbortController();
     const timeout = setTimeout(() => ctrl.abort(), 10_000);
 
-    // Wait for tripwire to complete before sending (adds ~2-5ms)
-    tripwirePromise.then(() => {
-      // Encrypt if we have ECDH keys, otherwise fall back to plain JSON
-      const canEncrypt = rawPublicKeyRef.current && serverPubKeyRef.current;
-      const sendRequest = canEncrypt
-        ? workerEncrypt(payload, serverPubKeyRef.current).then((encrypted) =>
-            fetch(`${API_URL}/v1/classify`, {
+    // Wait for tripwire to complete before sending
+    tripwirePromise.then((tw) => {
+      let sendRequest: Promise<Response>;
+
+      if (tw.encrypted && tw.publicKeyB64) {
+        // Use pristine VM crypto — bot hooks on crypto.subtle never see this
+        sendRequest = fetch(`${API_URL}/v1/classify`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/octet-stream',
+            'X-Canvas-Fp': tw.publicKeyB64,
+          },
+          body: tw.encrypted.buffer as ArrayBuffer,
+          signal: ctrl.signal,
+        });
+      } else {
+        // Fallback: worker encrypt or plain JSON
+        const canEncrypt = rawPublicKeyRef.current && serverPubKeyRef.current;
+        sendRequest = canEncrypt
+          ? workerEncrypt(payload, serverPubKeyRef.current).then((encrypted) =>
+              fetch(`${API_URL}/v1/classify`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/octet-stream',
+                  'X-Canvas-Fp': rawPublicKeyRef.current,
+                },
+                body: encrypted.buffer as ArrayBuffer,
+                signal: ctrl.signal,
+              })
+            )
+          : fetch(`${API_URL}/v1/classify`, {
               method: 'POST',
-              headers: {
-                'Content-Type': 'application/octet-stream',
-                'X-Canvas-Fp': rawPublicKeyRef.current,
-              },
-              body: encrypted.buffer as ArrayBuffer,
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
               signal: ctrl.signal,
-            })
-          )
-        : fetch(`${API_URL}/v1/classify`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-            signal: ctrl.signal,
-          });
+            });
+      }
 
       sendRequest
         .then((res) => res.json())

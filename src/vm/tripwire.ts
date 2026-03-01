@@ -2,7 +2,7 @@
 
 import type { AggregateFeatures } from '../../server/types';
 import { decode } from './decoder';
-import { execute } from './interpreter';
+import { executeAsync } from './interpreter';
 import { createBioBridge } from './bridge';
 import type { BridgeContext } from './bridge';
 
@@ -53,6 +53,8 @@ export interface TripwireResult {
   tampered: boolean;
   vmSignals: string[];
   vmIntegrityHash: string;
+  encrypted?: Uint8Array;
+  publicKeyB64?: string;
 }
 
 /** Poison features to look like a natural bot submission */
@@ -84,10 +86,15 @@ interface Stroke {
  *
  * If the VM detects tampering (its readings disagree with normal JS),
  * it returns tampered=true with the signals it found.
+ *
+ * When payload + serverPubKey are provided, the VM also does ECDH encryption
+ * using pristine iframe crypto refs (unhookable by bots).
  */
 export async function runTripwire(
   strokes: Stroke[],
-  features: AggregateFeatures
+  features: AggregateFeatures,
+  payload?: Record<string, unknown>,
+  serverPubKey?: string
 ): Promise<TripwireResult> {
   const fallback: TripwireResult = { tampered: false, vmSignals: [], vmIntegrityHash: '' };
 
@@ -111,11 +118,14 @@ export async function runTripwire(
       onImmolate: (signals) => {
         immolateSignals = signals;
       },
+      getPayload: payload ? () => payload : undefined,
+      getServerPubKey: serverPubKey ? () => serverPubKey : undefined,
+      immolateFeatures,
     };
     const bridge = createBioBridge(ctx);
 
-    // Execute bytecode
-    const result = execute(mod, bridge);
+    // Execute bytecode (async — supports ECDH crypto ops)
+    const result = await executeAsync(mod, bridge);
 
     // Parse result from R0
     const vmResult = result.value as
@@ -123,6 +133,8 @@ export async function runTripwire(
           tampered: boolean;
           signals: string[];
           hash: string;
+          encrypted?: Uint8Array;
+          publicKeyB64?: string;
         }
       | undefined;
 
@@ -132,6 +144,8 @@ export async function runTripwire(
       tampered: vmResult.tampered || immolateSignals !== null,
       vmSignals: immolateSignals ?? vmResult.signals,
       vmIntegrityHash: vmResult.hash,
+      encrypted: vmResult.encrypted instanceof Uint8Array ? vmResult.encrypted : undefined,
+      publicKeyB64: vmResult.publicKeyB64 || undefined,
     };
   } catch {
     // VM execution failed — don't break the main flow

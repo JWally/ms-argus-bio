@@ -19,6 +19,7 @@ export const Op = {
   // === API bridge (0x20-0x2F) ===
   API_GET: 0x20,
   API_CALL: 0x21,
+  API_CALL_ASYNC: 0x22,
 
   // === Arithmetic (0x30-0x3F) ===
   ADD: 0x30,
@@ -83,6 +84,7 @@ export function hasOperand(opcode: number): boolean {
     case Op.SET_PROP_STR:
     case Op.API_GET:
     case Op.API_CALL:
+    case Op.API_CALL_ASYNC:
     case Op.JMP:
     case Op.JMP_TRUE:
     case Op.JMP_FALSE:
