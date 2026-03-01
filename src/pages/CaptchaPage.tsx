@@ -20,6 +20,14 @@ import {
 } from '../utils/mask';
 import { extractServerKey } from '../utils/crypto';
 import { initCrypto, workerDecrypt, workerEncrypt } from '../utils/crypto-worker-client';
+import {
+  loadProgress,
+  saveProgress,
+  generateBoard,
+  getNextTier,
+  type Tier,
+  type BoardEntry,
+} from '../utils/progression';
 import '../App.css';
 
 type AppState = 'loading' | 'idle' | 'active' | 'complete';
@@ -107,6 +115,13 @@ export default function CaptchaPage() {
   const [argusToken, setArgusToken] = useState<string | null>(null);
   const [returnUrl, setReturnUrl] = useState<string | null>(null);
   const [retryMsg, setRetryMsg] = useState<string | null>(null);
+
+  // Progression state
+  const [progress, setProgress] = useState(loadProgress);
+  const [boardEntries, setBoardEntries] = useState<BoardEntry[]>([]);
+  const [tierCleared, setTierCleared] = useState(false);
+  const [boardMode, setBoardMode] = useState<'normal' | 'cleared' | 'shake' | 'off-pace'>('normal');
+  const [isNewPR, setIsNewPR] = useState(false);
 
   const canvasRef = useRef<CanvasHandle>(null);
   const timerRafRef = useRef(0);
@@ -313,6 +328,52 @@ export default function CaptchaPage() {
     timerRafRef.current = requestAnimationFrame(tickTimer);
   }, [state]);
 
+  // Generate tier board + update PR when captcha completes
+  const updateBoardAndProgress = useCallback(
+    (timeMs: number) => {
+      const tier = progress.currentTier;
+      const prev = progress.bestByTier[tier];
+      const baseline = progress.baselineByTier?.[tier];
+
+      // Generate board anchored to baseline (or current time on first attempt)
+      const board = generateBoard(timeMs, tier, progress.playerId, baseline);
+      setBoardEntries(board);
+
+      const playerEntry = board.find((e) => e.isPlayer);
+      const rank = playerEntry?.rank ?? board.length;
+      const beatPR = prev !== undefined && timeMs < prev;
+
+      // Determine display mode (computed BEFORE state updates)
+      if (rank === 1 && getNextTier(tier)) {
+        setBoardMode('cleared');
+        setTierCleared(true);
+      } else if (!prev || beatPR) {
+        setBoardMode('normal'); // first attempt or new PR
+      } else if (rank <= 5) {
+        setBoardMode('shake'); // solid but not PR
+      } else {
+        setBoardMode('off-pace'); // fell below leaders
+      }
+
+      setIsNewPR(beatPR);
+
+      // Persist best + baseline
+      if (!prev || timeMs < prev) {
+        const updated = {
+          ...progress,
+          bestByTier: { ...progress.bestByTier, [tier]: timeMs },
+          baselineByTier: {
+            ...progress.baselineByTier,
+            ...(!baseline ? { [tier]: timeMs } : {}),
+          },
+        };
+        setProgress(updated);
+        saveProgress(updated);
+      }
+    },
+    [progress]
+  );
+
   const advance = useCallback(
     (now: number) => {
       const nextIndex = currentIndexRef.current + 1;
@@ -330,6 +391,7 @@ export default function CaptchaPage() {
         });
         setState('complete');
         logPayload(totalTime, false);
+        updateBoardAndProgress(totalTime);
       } else {
         currentIndexRef.current = nextIndex;
         setCurrentIndex(nextIndex);
@@ -337,7 +399,7 @@ export default function CaptchaPage() {
         canvasRef.current?.clear();
       }
     },
-    [logPayload]
+    [logPayload, updateBoardAndProgress]
   );
 
   const handleNext = useCallback(() => {
@@ -399,6 +461,8 @@ export default function CaptchaPage() {
     setArgusToken(null);
     setReturnUrl(null);
     setRetryMsg(null);
+    setBoardMode('normal');
+    setIsNewPR(false);
     currentIndexRef.current = 0;
     digitResultsRef.current = [];
     allStrokesRef.current = [];
@@ -409,6 +473,21 @@ export default function CaptchaPage() {
     challengeRef.current = c;
     setState('idle');
   }, [fetchChallenge]);
+
+  // Auto-advance to next tier after tier-cleared celebration
+  useEffect(() => {
+    if (!tierCleared) return;
+    const id = setTimeout(async () => {
+      const next = getNextTier(progress.currentTier);
+      if (!next) return;
+      const updated = { ...progress, currentTier: next as Tier };
+      setProgress(updated);
+      saveProgress(updated);
+      setTierCleared(false);
+      await handleReset();
+    }, 4000);
+    return () => clearTimeout(id);
+  }, [tierCleared, progress, handleReset]);
 
   // Auto-reset after a retry (challenge mismatch)
   useEffect(() => {
@@ -482,6 +561,11 @@ export default function CaptchaPage() {
             verdict={verdict}
             argusToken={argusToken}
             returnUrl={returnUrl}
+            tier={progress.currentTier}
+            boardEntries={boardEntries}
+            boardMode={boardMode}
+            isNewPR={isNewPR}
+            tierCleared={tierCleared}
             onNext={handleNext}
             onErase={handleErase}
             onReset={handleReset}
@@ -499,6 +583,11 @@ function ActionStack({
   verdict,
   argusToken,
   returnUrl,
+  tier,
+  boardEntries,
+  boardMode,
+  isNewPR,
+  tierCleared,
   onNext,
   onErase,
   onReset,
@@ -509,6 +598,11 @@ function ActionStack({
   verdict: VerdictResult | null;
   argusToken: string | null;
   returnUrl: string | null;
+  tier: Tier;
+  boardEntries: BoardEntry[];
+  boardMode: 'normal' | 'cleared' | 'shake' | 'off-pace';
+  isNewPR: boolean;
+  tierCleared: boolean;
   onNext: () => void;
   onErase: () => void;
   onReset: () => void;
@@ -538,6 +632,11 @@ function ActionStack({
             totalTimeMs={finalResult.totalTimeMs}
             timedOut={finalResult.timedOut}
             verdict={verdict}
+            tier={tier}
+            boardEntries={boardEntries}
+            boardMode={boardMode}
+            isNewPR={isNewPR}
+            tierCleared={tierCleared}
           />
           <button onClick={onReset} className="btn btn-primary btn-stack">
             Try Again
@@ -553,108 +652,8 @@ function ActionStack({
           >
             Continue
           </button>
-          <StatsDrawer
-            digits={finalResult.digits}
-            features={finalResult.features}
-            verdict={verdict}
-          />
         </>
       )}
-    </div>
-  );
-}
-
-function StatsDrawer({
-  digits,
-  features,
-  verdict,
-}: {
-  digits: DigitResult[];
-  features: ReturnType<typeof computeFeatures>;
-  verdict: VerdictResult | null;
-}) {
-  const [open, setOpen] = useState(false);
-
-  return (
-    <div className="stats-wrapper">
-      <button
-        className="btn btn-secondary btn-stack btn-stats-toggle"
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-      >
-        Stats
-        <span className={`stats-chevron ${open ? 'stats-chevron-open' : ''}`}>&#9662;</span>
-      </button>
-
-      <div className={`stats-drawer ${open ? 'stats-drawer-open' : ''}`}>
-        <div className="stats-content">
-          {/* Per-glyph breakdown */}
-          <div className="stats-section">
-            <div className="stats-section-title">Per-Glyph Breakdown</div>
-            <div className="stats-grid">
-              {digits.map((d, i) => (
-                <div key={i} className="stats-digit-card">
-                  <div className="stats-digit-target">#{i + 1}</div>
-                  <div className="stats-digit-label">Confidence</div>
-                  <div className="stats-digit-value">{(d.confidence * 100).toFixed(1)}%</div>
-                  <div className="stats-digit-label">Time</div>
-                  <div className="stats-digit-value">{(d.timeMs / 1000).toFixed(2)}s</div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Biometric features */}
-          <div className="stats-section">
-            <div className="stats-section-title">Biometric Features</div>
-            <div className="stats-table">
-              <StatRow label="Strokes" value={features.strokeCount} />
-              <StatRow label="Total Points" value={features.totalPoints} />
-              <StatRow label="Avg Speed" value={features.avgSpeed.toFixed(3)} unit="px/ms" />
-              <StatRow label="Max Speed" value={features.maxSpeed.toFixed(3)} unit="px/ms" />
-              <StatRow label="Speed Variance" value={features.speedVariance.toFixed(4)} />
-              <StatRow label="Avg Pressure" value={features.avgPressure.toFixed(3)} />
-              <StatRow
-                label="Event Frequency"
-                value={features.eventFrequencyHz.toFixed(1)}
-                unit="Hz"
-              />
-              <StatRow label="Avg Jerk" value={features.avgJerk.toFixed(5)} />
-              <StatRow label="Total Duration" value={formatTime(features.totalDurationMs)} />
-              <StatRow
-                label="Avg Stroke Gap"
-                value={features.avgTimeBetweenStrokes.toFixed(0)}
-                unit="ms"
-              />
-            </div>
-          </div>
-
-          {/* Classification details */}
-          {verdict && (
-            <div className="stats-section">
-              <div className="stats-section-title">Classification</div>
-              <div className="stats-table">
-                <StatRow label="Verdict" value={verdict.verdict.toUpperCase()} />
-                <StatRow label="Confidence" value={`${Math.round(verdict.confidence * 100)}%`} />
-                <StatRow label="Neighbors" value={verdict.neighborCount} />
-                <StatRow label="Heuristic" value={verdict.heuristicLabel} />
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function StatRow({ label, value, unit }: { label: string; value: string | number; unit?: string }) {
-  return (
-    <div className="stats-row">
-      <span className="stats-label">{label}</span>
-      <span className="stats-value">
-        {value}
-        {unit && <span className="stats-unit"> {unit}</span>}
-      </span>
     </div>
   );
 }

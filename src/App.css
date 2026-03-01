@@ -536,140 +536,6 @@ header h1 {
   animation: spin 0.8s linear infinite;
 }
 
-/* Stats wrapper */
-.stats-wrapper {
-  width: 100%;
-}
-
-/* Stats toggle - extends .btn .btn-secondary .btn-stack */
-.btn-stats-toggle {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-}
-
-.stats-chevron {
-  font-size: 0.7rem;
-  transition: transform 0.3s ease;
-}
-
-.stats-chevron-open {
-  transform: rotate(180deg);
-}
-
-/* Stats drawer */
-.stats-drawer {
-  max-height: 0;
-  overflow: hidden;
-  transition: max-height 0.4s ease;
-}
-
-.stats-drawer-open {
-  max-height: 800px;
-}
-
-.stats-content {
-  padding-top: 1rem;
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-.stats-section {
-  text-align: left;
-}
-
-.stats-section-title {
-  font-size: 0.7rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.15em;
-  color: var(--text-muted);
-  margin-bottom: 0.5rem;
-}
-
-/* Digit cards */
-.stats-grid {
-  display: flex;
-  gap: 0.5rem;
-  overflow-x: auto;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
-
-.stats-grid::-webkit-scrollbar {
-  display: none;
-}
-
-.stats-digit-card {
-  flex: 1 0 3.5rem;
-  min-width: 3.5rem;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 0.625rem;
-  text-align: center;
-}
-
-.stats-digit-target {
-  font-size: 1.5rem;
-  font-weight: 800;
-  color: var(--accent);
-  margin-bottom: 0.375rem;
-}
-
-.stats-digit-label {
-  font-size: 0.55rem;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.15em;
-  color: var(--text-muted);
-  margin-top: 0.375rem;
-}
-
-.stats-digit-value {
-  font-family: 'JetBrains Mono', 'Fira Code', monospace;
-  font-size: 0.8rem;
-  font-weight: 300;
-  color: var(--text);
-}
-
-/* Stats table rows */
-.stats-table {
-  display: flex;
-  flex-direction: column;
-}
-
-.stats-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  padding: 0.4rem 0.5rem;
-  font-size: 0.8rem;
-  border-bottom: 1px solid var(--border);
-}
-
-.stats-row:last-child {
-  border-bottom: none;
-}
-
-.stats-label {
-  color: var(--text-muted);
-}
-
-.stats-value {
-  font-family: 'JetBrains Mono', 'Fira Code', monospace;
-  font-weight: 600;
-  color: var(--text);
-}
-
-.stats-unit {
-  color: var(--text-muted);
-  font-weight: 400;
-  font-size: 0.7rem;
-}
-
 /* Retry panel */
 .retry-panel {
   width: 100%;
@@ -698,6 +564,302 @@ header h1 {
 .retry-sub {
   font-size: 0.8rem;
   color: var(--text-muted);
+}
+
+/* ── Tier Board ──────────────────────────────────────────────────── */
+
+.tier-board {
+  width: 100%;
+  margin-top: 1rem;
+}
+
+.tier-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  margin-bottom: 0.5rem;
+}
+
+.tier-city .tier-label,
+.tier-city.tier-label {
+  color: #22c55e;
+}
+
+.tier-region .tier-label,
+.tier-region.tier-label {
+  color: #6366f1;
+}
+
+.tier-state .tier-label,
+.tier-state.tier-label {
+  color: #a855f7;
+}
+
+.tier-country .tier-label,
+.tier-country.tier-label {
+  color: #eab308;
+}
+
+.tier-entries {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.tier-entry {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.45rem 0.75rem;
+  border-radius: 8px;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  animation: slideUp 0.4s ease both;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.tier-entry-player {
+  background: rgba(34, 197, 94, 0.15);
+  color: var(--success);
+  font-weight: 700;
+  animation: slideUp 0.4s ease both, playerGlow 2s ease-in-out infinite;
+}
+
+@keyframes playerGlow {
+  0%,
+  100% {
+    box-shadow: 0 0 8px rgba(34, 197, 94, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 16px rgba(34, 197, 94, 0.4);
+  }
+}
+
+.tier-entry-rank {
+  width: 1.75rem;
+  flex-shrink: 0;
+  font-weight: 700;
+}
+
+.tier-entry-label {
+  flex: 1;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.tier-entry-player .tier-entry-label {
+  text-align: center;
+}
+
+.tier-entry-time {
+  flex-shrink: 0;
+  text-align: right;
+}
+
+/* Off-pace player entry — muted red tones */
+.tier-entry-off-pace {
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--text-muted);
+  font-weight: 700;
+  border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+/* Ellipsis separator between leaders and off-pace player */
+.tier-ellipsis {
+  text-align: center;
+  font-size: 1.25rem;
+  letter-spacing: 0.3em;
+  color: var(--text-muted);
+  opacity: 0.5;
+  padding: 0.375rem 0;
+  animation: slideUp 0.4s ease both;
+  animation-delay: 450ms;
+}
+
+/* Board shake — fires once when placing well but missing PR */
+.tier-entries-shake {
+  animation: boardShake 0.5s ease-in-out;
+  animation-delay: 0.8s;
+}
+
+@keyframes boardShake {
+  0%, 100% { transform: translateX(0); }
+  15% { transform: translateX(-4px); }
+  30% { transform: translateX(4px); }
+  45% { transform: translateX(-3px); }
+  60% { transform: translateX(3px); }
+  75% { transform: translateX(-1px); }
+  90% { transform: translateX(1px); }
+}
+
+/* PR badge */
+.pr-badge {
+  display: inline-block;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  background: rgba(234, 179, 8, 0.2);
+  color: #eab308;
+  border: 1px solid rgba(234, 179, 8, 0.4);
+  animation: prPop 0.4s ease both;
+}
+
+@keyframes prPop {
+  0% {
+    transform: scale(0);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.2);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* Tier messages */
+.tier-msg {
+  margin-top: 0.75rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.tier-msg-success {
+  color: var(--success);
+}
+
+.tier-near-miss {
+  margin-top: 0.75rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.tier-total {
+  margin-top: 0.375rem;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+
+
+/* ── Tier Cleared Celebration ─────────────────────────────────────── */
+
+.tier-cleared {
+  padding: 2rem 1rem;
+  text-align: center;
+  animation: fadeIn 0.5s ease;
+}
+
+.tier-cleared-header {
+  font-size: 2.5rem;
+  font-weight: 900;
+  letter-spacing: 0.2em;
+  background: linear-gradient(135deg, #22c55e, #6366f1, #eab308);
+  background-size: 200% 200%;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: gradientShift 2s ease infinite;
+}
+
+@keyframes gradientShift {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+.tier-cleared-time {
+  font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+  font-size: 1.5rem;
+  font-weight: 300;
+  color: var(--text);
+  margin: 0.75rem 0;
+}
+
+.tier-cleared-promotion {
+  font-size: 1rem;
+  color: var(--text-muted);
+  margin-top: 0.5rem;
+}
+
+.tier-cleared-next {
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.tier-cleared-dots {
+  display: flex;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-top: 1.25rem;
+}
+
+.tier-cleared-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  animation: dotBounce 1.4s ease-in-out infinite;
+}
+
+.tier-cleared-dot:nth-child(2) { animation-delay: 0.2s; }
+.tier-cleared-dot:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes dotBounce {
+  0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
+  40% { opacity: 1; transform: scale(1.2); }
+}
+
+/* Confetti */
+.confetti-container {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9998;
+  overflow: hidden;
+}
+
+.confetti-particle {
+  position: absolute;
+  top: 40%;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  animation: confettiFall 2.5s ease-out forwards;
+}
+
+@keyframes confettiFall {
+  0% {
+    transform: translateY(0) rotate(0deg) scale(1);
+    opacity: 1;
+  }
+  20% {
+    transform: translateY(calc(var(--confetti-distance) * -1))
+      rotate(calc(var(--confetti-angle))) scale(1.2);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(60vh) rotate(calc(var(--confetti-angle) + 360deg)) scale(0.3);
+    opacity: 0;
+  }
 }
 
 /* Main */
