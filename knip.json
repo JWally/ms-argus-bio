@@ -9,7 +9,7 @@
     "scripts/generate-sbox.ts"
   ],
   "project": ["src/**/*.{ts,tsx}", "server/**/*.ts", "cdk/**/*.ts", "scripts/**/*.ts"],
-  "ignore": ["**/*.test.ts"],
+  "ignore": ["**/*.test.ts", "scripts/tripwire-src/**"],
   "ignoreBinaries": ["cdk"],
   "exclude": ["types", "nsTypes", "exports"]
 }
