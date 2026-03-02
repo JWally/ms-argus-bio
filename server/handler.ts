@@ -565,6 +565,105 @@ async function parseClassifyBody(
   }
 }
 
+/** Detect JA4 TLS fingerprint / User-Agent mismatch.
+ *  JA4 section A encodes cipher count which differs by TLS library:
+ *  Safari (SecureTransport): 24+ ciphers, Chrome (BoringSSL): 15-17, Firefox (NSS): 17-19.
+ *  Returns a reason string on mismatch, null if OK or indeterminate. */
+function detectJa4UaMismatch(ja4: string, ua: string): string | null {
+  // JA4 format: t13d1516h2_hashB_hashC
+  // Section A: proto(1) + tls(2) + sni(1) + ciphers(2) + exts(2) + alpn(2+)
+  const sectionA = ja4.split('_')[0];
+  if (!sectionA || sectionA.length < 8) return null;
+
+  const nCiphers = parseInt(sectionA.substring(4, 6), 10);
+  if (isNaN(nCiphers)) return null;
+
+  const uaSaysSafari =
+    /Safari/i.test(ua) && /iPhone|iPad|Macintosh/i.test(ua) && !/Chrome|CriOS/i.test(ua);
+  const uaSaysFirefox = /Firefox/i.test(ua);
+
+  // Safari (SecureTransport): 24+ ciphers. Chrome (BoringSSL): 15-17.
+  if (uaSaysSafari && nCiphers < 20) return `safari-ua-but-${nCiphers}-ciphers`;
+  if (uaSaysFirefox && nCiphers < 14) return `firefox-ua-but-${nCiphers}-ciphers`;
+
+  return null;
+}
+
+interface TrainingContext {
+  client: QdrantClient;
+  embedding: number[];
+  result: { verdict: string };
+  hResult: { label: string; reason: string };
+  payload: BiometricPayload;
+  ja4: string | undefined;
+}
+
+/** Upsert a training vector if under the training cap. */
+async function maybeUpsertTraining(ctx: TrainingContext): Promise<boolean> {
+  const { client, embedding, result, hResult, payload, ja4 } = ctx;
+  if (cachedPointCount === null) {
+    const info = await client.collectionInfo(COLLECTION_NAME);
+    cachedPointCount = info.points_count;
+  }
+  if (cachedPointCount >= TRAINING_CAP) return false;
+
+  await client.upsert(COLLECTION_NAME, {
+    points: [
+      {
+        id: crypto.randomUUID(),
+        vector: embedding,
+        payload: {
+          label: result.verdict,
+          challengeId: payload.challengeId,
+          timestamp: payload.timestamp,
+          inputType: payload.inputType,
+          passed: payload.passed,
+          completionTimeMs: payload.completionTimeMs,
+          embeddingVersion: EMBEDDING_VERSION,
+          userAgent: payload.userAgent,
+          ja4: ja4 ?? 'missing',
+          heuristicLabel: hResult.label,
+          heuristicReason: hResult.reason,
+        },
+      },
+    ],
+  });
+  cachedPointCount++;
+  return true;
+}
+
+/** Handle session token creation if sessionId is present. */
+async function maybeCreateSessionToken(
+  payload: BiometricPayload,
+  verdict: Verdict,
+  confidence: number
+): Promise<APIGatewayProxyResultV2 | { token: string; returnUrl: string } | null> {
+  const sessionId = (payload as unknown as Record<string, unknown>).sessionId as string | undefined;
+  if (!sessionId) return null;
+
+  const session = await getSession(sessionId);
+  if (!session) return jsonResponse(404, { error: 'Session not found' });
+  if (session.status !== 'pending') return jsonResponse(409, { error: 'Session already used' });
+
+  const token = await createToken(
+    sessionId,
+    session.merchantId,
+    verdict.verdict,
+    Math.round(confidence * 1000) / 1000
+  );
+  await completeSession(sessionId);
+  return { token: token.token, returnUrl: session.returnUrl };
+}
+
+/** Check JA4/UA mismatch and return a retry response if detected, null otherwise. */
+function checkJa4Mismatch(ja4: string | undefined, ua: string): APIGatewayProxyResultV2 | null {
+  if (!ja4) return null;
+  const mismatch = detectJa4UaMismatch(ja4, ua);
+  if (!mismatch) return null;
+  logger.warn('JA4/UA mismatch', { ja4, ua: ua.substring(0, 100), reason: mismatch });
+  return jsonResponse(200, { retry: true, message: 'Incorrect. Try again.' });
+}
+
 async function handleClassify(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
   const start = Date.now();
 
@@ -575,6 +674,11 @@ async function handleClassify(event: APIGatewayProxyEventV2): Promise<APIGateway
     if (!validatePayload(payload)) {
       return jsonResponse(400, { error: 'Invalid payload structure' });
     }
+
+    // JA4 TLS fingerprint cross-check (tamper-proof — computed by CloudFront)
+    const ja4 = event.headers?.['cloudfront-viewer-ja4-fingerprint'];
+    const ja4Block = checkJa4Mismatch(ja4, event.headers?.['user-agent'] ?? '');
+    if (ja4Block) return ja4Block;
 
     // Server-side answer validation — returns retry response on mismatch
     const { retry: retryResponse, scores } = validateChallengeAnswers(payload);
@@ -601,50 +705,7 @@ async function handleClassify(event: APIGatewayProxyEventV2): Promise<APIGateway
     // Classify via kNN + heuristic fallback
     const result = classify(neighbors, hResult.label);
 
-    // Check training cap — skip upsert once collection has enough vectors
-    let trained = false;
-    if (cachedPointCount === null) {
-      const info = await client.collectionInfo(COLLECTION_NAME);
-      cachedPointCount = info.points_count;
-    }
-
-    // ── Training data gating ──
-    // Three guards prevent adversarial poisoning:
-    // 1. Never store "uncertain" verdicts
-    // 2. Heuristic must agree with kNN verdict (or cold-start with no neighbors)
-    //    — prevents poisoned kNN from laundering bot submissions as "human"
-    // 3. (near-duplicate check removed during training phase)
-    // const heuristicAgrees = hResult.label === result.verdict;
-    // const isColdStart = result.neighborCount === 0;
-    if (
-      cachedPointCount < TRAINING_CAP
-      // && result.verdict !== 'uncertain'
-      // && (heuristicAgrees || isColdStart)
-    ) {
-      const pointId = crypto.randomUUID();
-      await client.upsert(COLLECTION_NAME, {
-        points: [
-          {
-            id: pointId,
-            vector: embedding,
-            payload: {
-              label: result.verdict,
-              challengeId: payload.challengeId,
-              timestamp: payload.timestamp,
-              inputType: payload.inputType,
-              passed: payload.passed,
-              completionTimeMs: payload.completionTimeMs,
-              embeddingVersion: EMBEDDING_VERSION,
-              userAgent: payload.userAgent,
-              heuristicLabel: hResult.label,
-              heuristicReason: hResult.reason,
-            },
-          },
-        ],
-      });
-      cachedPointCount++;
-      trained = true;
-    }
+    const trained = await maybeUpsertTraining({ client, embedding, result, hResult, payload, ja4 });
 
     const verdict: Verdict = {
       verdict: result.verdict,
@@ -679,6 +740,7 @@ async function handleClassify(event: APIGatewayProxyEventV2): Promise<APIGateway
       speedVariance: Math.round(payload.features.speedVariance * 10000) / 10000,
       timingCV: Math.round(timingCV(payload) * 1000) / 1000,
       vmHash: payload.vmHash ?? 'missing',
+      ja4: ja4 ?? 'missing',
     });
 
     // Mask bot verdict — return same retry response as wrong answers
@@ -687,30 +749,13 @@ async function handleClassify(event: APIGatewayProxyEventV2): Promise<APIGateway
       return jsonResponse(200, { retry: true, message: 'Incorrect. Try again.' });
     }
 
-    const response: ClassifyResponse = {
-      ...verdict,
-      score,
-    };
+    const response: ClassifyResponse = { ...verdict, score };
 
-    // Session flow: create verification token and include returnUrl
-    const sessionId = (payload as unknown as Record<string, unknown>).sessionId as
-      | string
-      | undefined;
-    if (sessionId) {
-      const session = await getSession(sessionId);
-      if (!session) return jsonResponse(404, { error: 'Session not found' });
-      if (session.status !== 'pending') return jsonResponse(409, { error: 'Session already used' });
-
-      const token = await createToken(
-        sessionId,
-        session.merchantId,
-        verdict.verdict,
-        Math.round(result.confidence * 1000) / 1000
-      );
-      await completeSession(sessionId);
-
-      response.token = token.token;
-      response.returnUrl = session.returnUrl;
+    const sessionResult = await maybeCreateSessionToken(payload, verdict, result.confidence);
+    if (isErrorResponse(sessionResult)) return sessionResult;
+    if (sessionResult) {
+      response.token = sessionResult.token;
+      response.returnUrl = sessionResult.returnUrl;
     }
 
     return jsonResponse(200, response);

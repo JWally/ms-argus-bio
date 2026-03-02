@@ -208,7 +208,7 @@ export class BioStack extends Stack {
       entry: path.join(__dirname, '../../../server/handler.ts'),
       handler: 'handler',
       functionName: `${stackName}-classify`,
-      memorySize: 256,
+      memorySize: 512,
       timeout: Duration.seconds(30),
       vpc,
       vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
@@ -328,6 +328,29 @@ export class BioStack extends Stack {
     // httpApi.url is a CDK token — extract domain with Fn.split (token-safe)
     const apiGatewayDomain = cdk.Fn.select(2, cdk.Fn.split('/', httpApi.url!));
 
+    const apiOriginRequestPolicy = new cloudfront.OriginRequestPolicy(
+      this,
+      'ApiOriginRequestPolicy',
+      {
+        originRequestPolicyName: `${stackName}-api-origin-request`,
+        comment: 'Forward viewer headers (no Host) + TLS fingerprints to Lambda',
+        headerBehavior: cloudfront.OriginRequestHeaderBehavior.allowList(
+          'Content-Type',
+          'User-Agent',
+          'Accept',
+          'Origin',
+          'Referer',
+          'X-Canvas-Fp',
+          'Access-Control-Request-Method',
+          'Access-Control-Request-Headers',
+          'CloudFront-Viewer-JA3-Fingerprint',
+          'CloudFront-Viewer-JA4-Fingerprint'
+        ),
+        queryStringBehavior: cloudfront.OriginRequestQueryStringBehavior.all(),
+        cookieBehavior: cloudfront.OriginRequestCookieBehavior.all(),
+      }
+    );
+
     const apiDistribution = new cloudfront.Distribution(this, 'ApiDistribution', {
       defaultBehavior: {
         origin: new origins.HttpOrigin(apiGatewayDomain, {
@@ -336,7 +359,7 @@ export class BioStack extends Stack {
         viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
         allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
         cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
-        originRequestPolicy: cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+        originRequestPolicy: apiOriginRequestPolicy,
       },
       domainNames: [apiDomainName],
       certificate: apiCertificate,
