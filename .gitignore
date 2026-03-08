@@ -26,6 +26,9 @@ src/vm/bytecode-modules.ts
 # Test coverage
 coverage
 
+# Profiling output
+profile-results
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

@@ -13,6 +13,7 @@ import {
   type VerdictResult,
 } from '../utils/biometrics';
 import { runTripwire, type TripwireResult } from '../vm/tripwire';
+import { measureAsync, measureSync, observeLongTasks } from '../utils/perf';
 import {
   buildClientImage,
   mask1bitTo8bit,
@@ -37,6 +38,9 @@ const API_URL = import.meta.env.VITE_API_URL as string | undefined;
 
 // Eagerly start ECDH key generation so it's ready before first fetchChallenge
 const cryptoReady = API_URL ? initCrypto() : null;
+
+// Start long-task observer for profiling
+observeLongTasks();
 
 function isEmbedded(): boolean {
   return new URLSearchParams(window.location.search).get('embed') === '1';
@@ -160,7 +164,10 @@ export default function CaptchaPage() {
     try {
       // Use eagerly-started crypto or reuse from previous round
       if (!rawPublicKeyRef.current) {
-        const { rawPublicKey } = await (cryptoReady ?? initCrypto());
+        const { rawPublicKey } = await measureAsync(
+          'crypto:init',
+          () => cryptoReady ?? initCrypto()
+        );
         rawPublicKeyRef.current = rawPublicKey;
       }
 
@@ -172,10 +179,12 @@ export default function CaptchaPage() {
       const challengeParams = new URLSearchParams();
       if (sessionIdRef.current) challengeParams.set('sid', sessionIdRef.current);
       const challengeQs = challengeParams.toString();
-      const res = await fetch(`${API_URL}/v1/challenge${challengeQs ? `?${challengeQs}` : ''}`, {
-        headers,
+      const data = await measureAsync('fetch:challenge', async () => {
+        const res = await fetch(`${API_URL}/v1/challenge${challengeQs ? `?${challengeQs}` : ''}`, {
+          headers,
+        });
+        return res.json();
       });
-      const data = await res.json();
 
       if (data.error) {
         setSessionError(data.error);
@@ -197,7 +206,9 @@ export default function CaptchaPage() {
       let images: string[];
       let dims: { w: number; h: number };
       if (data.enc && rawPublicKeyRef.current && extracted.serverPubKey) {
-        const decrypted = await workerDecrypt(data.enc as string, extracted.serverPubKey);
+        const decrypted = await measureAsync('crypto:decrypt-challenge', () =>
+          workerDecrypt(data.enc as string, extracted.serverPubKey)
+        );
         if ('images' in decrypted) {
           images = decrypted.images;
           dims = { w: decrypted.width, h: decrypted.height };
@@ -239,8 +250,13 @@ export default function CaptchaPage() {
   }, [fetchChallenge]);
 
   const logPayload = useCallback((totalTimeMs: number, timedOut: boolean) => {
-    const features = computeFeatures(allStrokesRef.current);
-    const tamperedApis = [...detectTampering(), ...detectCDP()];
+    const features = measureSync('compute:biometrics', () =>
+      computeFeatures(allStrokesRef.current)
+    );
+    const tamperedApis = measureSync('detect:tampering', () => [
+      ...detectTampering(),
+      ...detectCDP(),
+    ]);
 
     const payload = {
       challengeId: challengeIdRef.current || crypto.randomUUID(),
@@ -264,11 +280,13 @@ export default function CaptchaPage() {
 
     // Run tripwire VM with payload + serverPubKey for pristine ECDH encryption.
     // The bridge modifies `payload` in-place (sets vmHash, immolates if tampered).
-    const tripwirePromise = runTripwire(
-      allStrokesRef.current,
-      features,
-      payload as Record<string, unknown>,
-      serverPubKeyRef.current || undefined
+    const tripwirePromise = measureAsync('vm:tripwire', () =>
+      runTripwire(
+        allStrokesRef.current,
+        features,
+        payload as Record<string, unknown>,
+        serverPubKeyRef.current || undefined
+      )
     ).catch(
       (): TripwireResult => ({
         tampered: false,
@@ -294,6 +312,7 @@ export default function CaptchaPage() {
 
     // Wait for tripwire to complete before sending
     tripwirePromise.then((tw) => {
+      performance.mark('fetch:classify:start');
       let sendRequest: Promise<Response>;
 
       if (tw.encrypted && tw.publicKeyB64) {
@@ -358,7 +377,11 @@ export default function CaptchaPage() {
           console.error('[ARGUS BIO] Classification error', err);
           setVerdict(fallbackVerdict);
         })
-        .finally(() => clearTimeout(timeout));
+        .finally(() => {
+          performance.mark('fetch:classify:end');
+          performance.measure('fetch:classify', 'fetch:classify:start', 'fetch:classify:end');
+          clearTimeout(timeout);
+        });
     }); // end tripwirePromise.then
   }, []);
 
@@ -375,19 +398,26 @@ export default function CaptchaPage() {
     startTimeRef.current = startTime;
     glyphStartTimeRef.current = startTime;
 
-    // Timer via rAF
+    // Timer via rAF — only push state updates every 250ms to avoid re-rendering at 60fps
+    let lastUiUpdate = 0;
     const tickTimer = () => {
       if (!activeRef.current) return;
       const elapsed = performance.now() - startTime;
-      setElapsedMs(elapsed);
+
+      // Throttle React state updates to ~4/sec (timer only shows seconds)
+      if (elapsed - lastUiUpdate >= 250) {
+        lastUiUpdate = elapsed;
+        setElapsedMs(elapsed);
+      }
 
       if (elapsed >= TIMEOUT_MS) {
+        setElapsedMs(TIMEOUT_MS);
         activeRef.current = false;
         setFinalResult({
           totalTimeMs: TIMEOUT_MS,
           timedOut: true,
           digits: [...digitResultsRef.current],
-          features: computeFeatures(allStrokesRef.current),
+          features: measureSync('compute:biometrics', () => computeFeatures(allStrokesRef.current)),
         });
         setState('complete');
         return;
@@ -456,7 +486,7 @@ export default function CaptchaPage() {
           totalTimeMs: totalTime,
           timedOut: false,
           digits: [...digitResultsRef.current],
-          features: computeFeatures(allStrokesRef.current),
+          features: measureSync('compute:biometrics', () => computeFeatures(allStrokesRef.current)),
         });
         setState('complete');
         logPayload(totalTime, false);
@@ -481,7 +511,7 @@ export default function CaptchaPage() {
 
     const now = performance.now();
     const strokes = canvasRef.current?.getStrokes() ?? [];
-    const imgData = getImageData28x28(canvas);
+    const imgData = measureSync('preprocess:image', () => getImageData28x28(canvas));
     const inkPixels = imgData.filter((v) => v > 20).length;
     const INK_THRESHOLD = 15;
 
