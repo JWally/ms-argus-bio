@@ -74,10 +74,18 @@ export class CheckoutStack extends Stack {
       },
     });
 
+    const lambdaIntegration = new integrations.HttpLambdaIntegration('LambdaIntegration', fn);
+
     api.addRoutes({
       path: '/api/session',
       methods: [apigatewayv2.HttpMethod.POST],
-      integration: new integrations.HttpLambdaIntegration('SessionIntegration', fn),
+      integration: lambdaIntegration,
+    });
+
+    api.addRoutes({
+      path: '/api/verify',
+      methods: [apigatewayv2.HttpMethod.POST],
+      integration: lambdaIntegration,
     });
 
     // ── S3 bucket (static site) ────────────────────────────────────────

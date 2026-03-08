@@ -925,5 +925,5 @@ body.embedded main {
 }
 
 body.embedded .drawing-canvas {
-  height: min(var(--canvas-size), calc(100dvh - 18rem));
+  height: min(calc(var(--canvas-size) / 2), calc(100dvh - 18rem));
 }

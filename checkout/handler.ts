@@ -26,11 +26,49 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
     return createSession();
   }
 
+  if (route === 'POST /api/verify') {
+    return verifyToken(event);
+  }
+
   return {
     statusCode: 404,
     headers: { ...CORS_HEADERS, 'content-type': 'application/json' },
     body: JSON.stringify({ error: 'Not found' }),
   };
+}
+
+async function verifyToken(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
+  try {
+    const body = JSON.parse(event.body || '{}');
+    const token = body.token;
+    if (!token) {
+      return {
+        statusCode: 400,
+        headers: { ...CORS_HEADERS, 'content-type': 'application/json' },
+        body: JSON.stringify({ error: 'Token required' }),
+      };
+    }
+
+    const res = await fetch(`${BIO_API_URL}/v1/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ secret: BIO_API_SECRET, response: token }),
+    });
+
+    const data = await res.json();
+
+    return {
+      statusCode: res.status,
+      headers: { ...CORS_HEADERS, 'content-type': 'application/json' },
+      body: JSON.stringify(data),
+    };
+  } catch {
+    return {
+      statusCode: 502,
+      headers: { ...CORS_HEADERS, 'content-type': 'application/json' },
+      body: JSON.stringify({ error: 'Verification failed' }),
+    };
+  }
 }
 
 async function createSession(): Promise<APIGatewayProxyResultV2> {

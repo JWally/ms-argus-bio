@@ -107,10 +107,11 @@ interface FinalResult {
   features: ReturnType<typeof computeFeatures>;
 }
 
-function formatTime(ms: number): string {
+function formatTime(ms: number, compact = false): string {
   const totalSecs = Math.floor(ms / 1000);
   const mins = Math.floor(totalSecs / 60);
   const secs = totalSecs % 60;
+  if (compact) return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   const millis = Math.floor(ms % 1000);
   return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}.${String(millis).padStart(3, '0')}`;
 }
@@ -647,7 +648,9 @@ export default function CaptchaPage() {
         <main>
           {state !== 'complete' && (
             <>
-              <div className={timerClass}>{formatTime(Math.max(0, TIMEOUT_MS - elapsedMs))}</div>
+              <div className={timerClass}>
+                {formatTime(Math.max(0, TIMEOUT_MS - elapsedMs), isEmbedded())}
+              </div>
 
               <div className="challenge-digits">
                 <DotChallenge
@@ -745,7 +748,14 @@ function ActionStack({
           <p className="retry-sub">Resetting automatically&hellip;</p>
         </div>
       )}
-      {state === 'complete' && finalResult && !retryMsg && (
+      {state === 'complete' && finalResult && !retryMsg && isEmbedded() && (
+        <div className="loading-panel">
+          <p className="loading-msg" style={{ color: 'var(--green, #22c55e)' }}>
+            {argusToken ? 'Verified!' : 'Processing...'}
+          </p>
+        </div>
+      )}
+      {state === 'complete' && finalResult && !retryMsg && !isEmbedded() && (
         <>
           <ResultDisplay
             totalTimeMs={finalResult.totalTimeMs}
@@ -761,12 +771,10 @@ function ActionStack({
             Try Again
           </button>
           <button
-            className={`btn btn-stack ${argusToken && (returnUrl || isEmbedded()) ? 'btn-primary' : 'btn-secondary'}`}
-            disabled={!argusToken || (!returnUrl && !isEmbedded())}
+            className={`btn btn-stack ${argusToken && returnUrl ? 'btn-primary' : 'btn-secondary'}`}
+            disabled={!argusToken || !returnUrl}
             onClick={() => {
-              if (argusToken && isEmbedded()) {
-                window.parent.postMessage({ type: 'argus-bio-verified', token: argusToken }, '*');
-              } else if (argusToken && returnUrl) {
+              if (argusToken && returnUrl) {
                 window.location.href = `${returnUrl}?argus_token=${encodeURIComponent(argusToken)}`;
               }
             }}

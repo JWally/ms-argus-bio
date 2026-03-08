@@ -407,9 +407,9 @@
           sessionId: data.sessionId,
           onVerified: function (token) {
             status.className = 'status success';
-            status.textContent = 'Identity verified. Welcome back!';
-            btn.innerHTML = '<svg class="lock-icon" viewBox="0 0 16 16" fill="currentColor"><path d="M7 10.4l-2.5-2.5 1.06-1.06L7 8.28l3.44-3.44 1.06 1.06L7 10.4z"/><path d="M8 0L1 3v5c0 4.25 3 7.4 7 8 4-.6 7-3.75 7-8V3L8 0zm0 2.18l5 2.14v3.96c0 3.31-2.19 5.85-5 6.53-2.81-.68-5-3.22-5-6.53V4.32l5-2.14z"/></svg> Verified';
-            btn.disabled = true;
+            status.textContent = 'Identity verified. Signing in...';
+            sessionStorage.setItem('argus_token', token);
+            setTimeout(function () { window.location.href = '/dashboard.html'; }, 600);
           },
           onError: function (err) {
             status.className = 'status error';
