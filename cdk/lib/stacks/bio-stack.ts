@@ -208,7 +208,7 @@ export class BioStack extends Stack {
       entry: path.join(__dirname, '../../../server/handler.ts'),
       handler: 'handler',
       functionName: `${stackName}-classify`,
-      memorySize: 512,
+      memorySize: 1024,
       timeout: Duration.seconds(30),
       vpc,
       vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
@@ -319,6 +319,15 @@ export class BioStack extends Stack {
       path: '/admin/relabel',
       methods: [apigatewayv2.HttpMethod.POST],
       integration: lambdaIntegration,
+    });
+
+    // =========================================================================
+    // LAMBDA WARMER
+    // =========================================================================
+
+    new events.Rule(this, 'ClassifyWarmerRule', {
+      schedule: events.Schedule.rate(Duration.minutes(1)),
+      targets: [new targets.LambdaFunction(classifyFn)],
     });
 
     // =========================================================================

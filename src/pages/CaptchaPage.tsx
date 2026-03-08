@@ -35,6 +35,16 @@ type AppState = 'loading' | 'idle' | 'active' | 'complete';
 
 const API_URL = import.meta.env.VITE_API_URL as string | undefined;
 
+// Eagerly start ECDH key generation so it's ready before first fetchChallenge
+const cryptoReady = API_URL ? initCrypto() : null;
+
+function isEmbedded(): boolean {
+  return new URLSearchParams(window.location.search).get('embed') === '1';
+}
+
+// Lock body to viewport when embedded in iframe
+if (isEmbedded()) document.body.classList.add('embedded');
+
 const TIMEOUT_MS = 30_000;
 
 // ── Glyph type ──────────────────────────────────────────────────────
@@ -116,6 +126,7 @@ export default function CaptchaPage() {
   const [argusToken, setArgusToken] = useState<string | null>(null);
   const [returnUrl, setReturnUrl] = useState<string | null>(null);
   const [retryMsg, setRetryMsg] = useState<string | null>(null);
+  const [sessionError, setSessionError] = useState<string | null>(null);
 
   // Progression state
   const [progress, setProgress] = useState(loadProgress);
@@ -147,9 +158,9 @@ export default function CaptchaPage() {
   const fetchChallenge = useCallback(async (): Promise<Glyph[]> => {
     if (!API_URL) return generateFallbackChallenge();
     try {
-      // Initialize Worker crypto (or reuse from previous round)
+      // Use eagerly-started crypto or reuse from previous round
       if (!rawPublicKeyRef.current) {
-        const { rawPublicKey } = await initCrypto();
+        const { rawPublicKey } = await (cryptoReady ?? initCrypto());
         rawPublicKeyRef.current = rawPublicKey;
       }
 
@@ -158,8 +169,21 @@ export default function CaptchaPage() {
         headers['X-Canvas-Fp'] = rawPublicKeyRef.current;
       }
 
-      const res = await fetch(`${API_URL}/v1/challenge`, { headers });
+      const challengeParams = new URLSearchParams();
+      if (sessionIdRef.current) challengeParams.set('sid', sessionIdRef.current);
+      const challengeQs = challengeParams.toString();
+      const res = await fetch(`${API_URL}/v1/challenge${challengeQs ? `?${challengeQs}` : ''}`, {
+        headers,
+      });
       const data = await res.json();
+
+      if (data.error) {
+        setSessionError(data.error);
+        if (isEmbedded()) {
+          window.parent.postMessage({ type: 'argus-bio-error', error: data.error }, '*');
+        }
+        return [];
+      }
 
       // Extract server's public key appended to challengeId
       const extracted = extractServerKey(data.challengeId as string);
@@ -311,6 +335,15 @@ export default function CaptchaPage() {
         .then((v) => {
           // eslint-disable-next-line no-console
           console.log('[ARGUS BIO] Verdict', v);
+          if (v.error) {
+            // eslint-disable-next-line no-console
+            console.error('[ARGUS BIO] Server error:', v.error);
+            if (isEmbedded()) {
+              window.parent.postMessage({ type: 'argus-bio-error', error: v.error }, '*');
+            }
+            setRetryMsg(v.error);
+            return;
+          }
           if (v.retry) {
             setRetryMsg(v.message || 'Incorrect. Try again!');
             return;
@@ -532,6 +565,15 @@ export default function CaptchaPage() {
     return () => clearTimeout(id);
   }, [retryMsg, handleReset]);
 
+  // Auto-post verified token to parent when embedded in iframe
+  useEffect(() => {
+    if (!argusToken || !isEmbedded()) return;
+    const id = setTimeout(() => {
+      window.parent.postMessage({ type: 'argus-bio-verified', token: argusToken }, '*');
+    }, 1500);
+    return () => clearTimeout(id);
+  }, [argusToken]);
+
   const remainingMs = TIMEOUT_MS - elapsedMs;
   const timerClass = [
     'timer',
@@ -556,14 +598,22 @@ export default function CaptchaPage() {
         <p className="subtitle">Handwriting Biometric Captcha</p>
       </header>
 
-      {state === 'loading' && (
+      {sessionError && (
+        <div className="loading-panel">
+          <p className="loading-msg" style={{ color: 'var(--red, #ef4444)' }}>
+            {sessionError}
+          </p>
+        </div>
+      )}
+
+      {!sessionError && state === 'loading' && (
         <div className="loading-panel">
           <div className="spinner" />
           <p className="loading-msg">{loadingMsg}</p>
         </div>
       )}
 
-      {state !== 'loading' && (
+      {!sessionError && state !== 'loading' && (
         <main>
           {state !== 'complete' && (
             <>
@@ -681,10 +731,12 @@ function ActionStack({
             Try Again
           </button>
           <button
-            className={`btn btn-stack ${argusToken && returnUrl ? 'btn-primary' : 'btn-secondary'}`}
-            disabled={!argusToken || !returnUrl}
+            className={`btn btn-stack ${argusToken && (returnUrl || isEmbedded()) ? 'btn-primary' : 'btn-secondary'}`}
+            disabled={!argusToken || (!returnUrl && !isEmbedded())}
             onClick={() => {
-              if (argusToken && returnUrl) {
+              if (argusToken && isEmbedded()) {
+                window.parent.postMessage({ type: 'argus-bio-verified', token: argusToken }, '*');
+              } else if (argusToken && returnUrl) {
                 window.location.href = `${returnUrl}?argus_token=${encodeURIComponent(argusToken)}`;
               }
             }}

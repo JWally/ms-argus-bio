@@ -40,9 +40,23 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   justify-content: center;
+  overscroll-behavior: none;
+}
+
+/* Embedded in iframe — lock to viewport, no scroll */
+html.embedded,
+body.embedded {
+  height: 100dvh;
+  max-height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+  overscroll-behavior: none;
+  touch-action: pan-x pan-y;
+  position: fixed;
+  width: 100%;
 }
 
 #root {

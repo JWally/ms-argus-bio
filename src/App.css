@@ -896,3 +896,34 @@ main {
     display: none;
   }
 }
+
+/* Embedded in iframe — compact layout to fit viewport */
+body.embedded .app {
+  gap: 0.75rem;
+}
+
+body.embedded #root {
+  padding: 0.5rem;
+  height: 100dvh;
+  max-height: 100dvh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+body.embedded header h1 {
+  font-size: 1.5rem;
+}
+
+body.embedded .subtitle {
+  font-size: 0.75rem;
+}
+
+body.embedded main {
+  --canvas-size: min(calc(100vw - 1rem), 400px);
+}
+
+body.embedded .drawing-canvas {
+  height: min(var(--canvas-size), calc(100dvh - 18rem));
+}

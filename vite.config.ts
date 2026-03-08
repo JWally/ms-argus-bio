@@ -59,14 +59,61 @@ function compileTripwirePlugin(): Plugin {
   };
 }
 
+/** Vite plugin that injects modulepreload hints for lazy chunks that are always needed. */
+function preloadLazyChunksPlugin(): Plugin {
+  return {
+    name: 'vite-plugin-preload-lazy',
+    enforce: 'post',
+    transformIndexHtml(html, ctx) {
+      if (!ctx.bundle) return html;
+      const tags: { tag: string; attrs: Record<string, string>; injectTo: 'head' }[] = [];
+      for (const [fileName] of Object.entries(ctx.bundle)) {
+        if (fileName.includes('CaptchaPage') && fileName.endsWith('.js')) {
+          tags.push({
+            tag: 'link',
+            attrs: { rel: 'modulepreload', crossorigin: '', href: `/${fileName}` },
+            injectTo: 'head',
+          });
+        }
+        if (fileName.includes('CaptchaPage') && fileName.endsWith('.css')) {
+          tags.push({
+            tag: 'link',
+            attrs: { rel: 'preload', as: 'style', crossorigin: '', href: `/${fileName}` },
+            injectTo: 'head',
+          });
+        }
+        if (fileName.includes('pako') && fileName.endsWith('.js')) {
+          tags.push({
+            tag: 'link',
+            attrs: { rel: 'modulepreload', crossorigin: '', href: `/${fileName}` },
+            injectTo: 'head',
+          });
+        }
+        if (fileName.includes('crypto.worker') && fileName.endsWith('.js')) {
+          tags.push({
+            tag: 'link',
+            attrs: { rel: 'preload', as: 'script', crossorigin: '', href: `/${fileName}` },
+            injectTo: 'head',
+          });
+        }
+      }
+      return tags;
+    },
+  };
+}
+
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), compileTripwirePlugin(), obfuscatorPlugin()],
+  plugins: [react(), compileTripwirePlugin(), preloadLazyChunksPlugin(), obfuscatorPlugin()],
   build: {
     rollupOptions: {
       output: {
-        manualChunks: {
-          vendor: ['react', 'react-dom'],
+        manualChunks(id) {
+          if (id.includes('node_modules')) {
+            if (id.includes('react-dom') || id.includes('react/') || id.includes('scheduler'))
+              return 'vendor';
+            if (id.includes('pako')) return 'pako';
+          }
         },
       },
     },

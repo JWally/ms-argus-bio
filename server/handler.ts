@@ -375,6 +375,11 @@ const routes: Record<string, RouteHandler> = {
 };
 
 export async function handler(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
+  // Warmer ping from EventBridge — exit immediately
+  if (!(event as unknown as Record<string, unknown>).requestContext) {
+    return { statusCode: 200, body: 'warm' };
+  }
+
   const method = event.requestContext.http.method;
   if (method === 'OPTIONS') {
     return cors({ statusCode: 204, body: '' });
@@ -433,6 +438,15 @@ async function parseAndAuth(
 
 async function handleChallenge(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
   const mode = event.queryStringParameters?.mode;
+  const sid = event.queryStringParameters?.sid;
+
+  // If a session ID is provided, validate it before generating a challenge
+  if (sid) {
+    const session = await getSession(sid);
+    if (!session) return jsonResponse(404, { error: 'Session not found' });
+    if (session.status !== 'pending') return jsonResponse(409, { error: 'Session already used' });
+  }
+
   const glyphs = generateServerChallenge();
   let challengeId = encryptChallenge(glyphs, Date.now(), mode);
 
