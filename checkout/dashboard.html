@@ -1,286 +1,478 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>My Accounts — Lone Star National Bank</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    :root {
-      --navy: #0c1b33;
-      --navy-light: #162d50;
-      --gold: #c9a84c;
-      --cream: #faf8f4;
-      --cream-dark: #f0ece4;
-      --text: #1a1a2e;
-      --text-secondary: #5a5a6e;
-      --text-muted: #8a8a9a;
-      --border: #ddd8cc;
-      --white: #ffffff;
-      --positive: #2d7a3a;
-      --negative: #b33a3a;
-    }
-    body {
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: var(--cream);
-      color: var(--text);
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-    }
-
-    /* ── Header ─────────────────────────────────────────────── */
-    .header { background: var(--navy); color: var(--white); }
-    .header-top {
-      max-width: 900px; margin: 0 auto; padding: 1rem 1.5rem;
-      display: flex; align-items: center; justify-content: space-between;
-    }
-    .logo { display: flex; align-items: center; gap: 0.6rem; }
-    .logo-star { width: 32px; height: 32px; }
-    .logo-text {
-      font-family: 'Playfair Display', Georgia, serif;
-      font-size: 1.1rem; font-weight: 700; line-height: 1.15;
-    }
-    .logo-text span {
-      display: block; font-size: 0.55rem; font-family: 'Inter', sans-serif;
-      font-weight: 500; letter-spacing: 0.15em; text-transform: uppercase; color: var(--gold);
-    }
-    .header-right { display: flex; align-items: center; gap: 1.25rem; font-size: 0.8rem; }
-    .header-right .greeting { color: rgba(255,255,255,0.8); }
-    .header-right a {
-      color: var(--gold); text-decoration: none; font-weight: 500;
-    }
-    .header-right a:hover { text-decoration: underline; }
-    .header-bar { background: var(--gold); height: 3px; }
-
-    /* ── Loading / Auth gate ───────────────────────────────── */
-    .gate { flex: 1; display: flex; align-items: center; justify-content: center; padding: 2rem; }
-    .gate p { color: var(--text-muted); font-size: 0.9rem; }
-
-    /* ── Dashboard ─────────────────────────────────────────── */
-    .dashboard { flex: 1; max-width: 900px; margin: 0 auto; padding: 2rem 1.5rem; width: 100%; display: none; }
-    .welcome {
-      margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border);
-    }
-    .welcome h1 {
-      font-family: 'Playfair Display', Georgia, serif;
-      font-size: 1.5rem; font-weight: 600; color: var(--navy); margin-bottom: 0.25rem;
-    }
-    .welcome p { font-size: 0.825rem; color: var(--text-secondary); }
-
-    .section-title {
-      font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
-      letter-spacing: 0.08em; color: var(--text-muted); margin-bottom: 0.75rem;
-    }
-
-    /* ── Account cards ──────────────────────────────────────── */
-    .accounts { display: flex; flex-direction: column; gap: 0.75rem; margin-bottom: 2rem; }
-    .account-card {
-      background: var(--white); border: 1px solid var(--border); border-radius: 10px;
-      padding: 1.25rem 1.5rem; display: flex; justify-content: space-between; align-items: center;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.04);
-    }
-    .account-name { font-weight: 600; font-size: 0.9rem; margin-bottom: 0.15rem; }
-    .account-number { font-size: 0.75rem; color: var(--text-muted); }
-    .account-balance { text-align: right; }
-    .balance-label { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); margin-bottom: 0.15rem; }
-    .balance-amount { font-size: 1.35rem; font-weight: 600; color: var(--navy); }
-    @media (max-width: 480px) {
-      .account-card { padding: 1rem; }
-      .balance-amount { font-size: 1.1rem; }
-    }
-
-    /* ── Transactions ───────────────────────────────────────── */
-    .transactions {
-      background: var(--white); border: 1px solid var(--border); border-radius: 10px;
-      overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.04);
-    }
-    .tx-header {
-      padding: 0.85rem 1.25rem; background: var(--cream-dark);
-      font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
-      letter-spacing: 0.06em; color: var(--text-secondary);
-      display: flex; justify-content: space-between;
-    }
-    .tx-row {
-      padding: 0.75rem 1.25rem; display: flex; justify-content: space-between;
-      align-items: center; border-top: 1px solid var(--cream-dark); font-size: 0.85rem;
-    }
-    .tx-row:first-child { border-top: none; }
-    .tx-desc { flex: 1; }
-    .tx-desc .merchant { font-weight: 500; }
-    .tx-desc .date { font-size: 0.7rem; color: var(--text-muted); margin-top: 0.1rem; }
-    .tx-amount { font-weight: 600; white-space: nowrap; margin-left: 1rem; }
-    .tx-amount.debit { color: var(--text); }
-    .tx-amount.credit { color: var(--positive); }
-
-    /* ── Footer ─────────────────────────────────────────────── */
-    .footer {
-      text-align: center; padding: 1.5rem 1rem; font-size: 0.7rem;
-      color: var(--text-muted); line-height: 1.7;
-    }
-    .footer a { color: var(--text-secondary); text-decoration: none; }
-    .footer a:hover { text-decoration: underline; }
-
-    .verified-badge {
-      display: inline-flex; align-items: center; gap: 0.4rem;
-      background: #e8f5e9; color: var(--positive); font-size: 0.7rem;
-      font-weight: 600; padding: 0.25rem 0.6rem; border-radius: 4px;
-    }
-    .verified-badge svg { width: 12px; height: 12px; }
-  </style>
-</head>
-<body>
-
-  <header class="header">
-    <div class="header-top">
-      <div class="logo">
-        <svg class="logo-star" viewBox="0 0 40 40" fill="none">
-          <path d="M20 2l4.9 11.1L37 15.5l-8.8 8 2.6 12.5L20 30.2 9.2 36l2.6-12.5-8.8-8 12.1-2.4L20 2z" fill="#c9a84c" />
-          <path d="M20 8l3 6.8 7.4 1.5-5.4 4.9 1.6 7.6L20 25l-6.6 3.8 1.6-7.6-5.4-4.9 7.4-1.5L20 8z" fill="#0c1b33" />
-        </svg>
-        <div class="logo-text">Lone Star National<span>Online Banking</span></div>
-      </div>
-      <div class="header-right">
-        <span class="greeting">Welcome, Sarah</span>
-        <a href="/" id="sign-out">Sign Out</a>
-      </div>
-    </div>
-    <div class="header-bar"></div>
-  </header>
-
-  <div class="gate" id="gate">
-    <p id="gate-msg">Verifying session...</p>
-  </div>
-
-  <main class="dashboard" id="dashboard">
-    <div class="welcome">
-      <h1>Good morning, Sarah.</h1>
-      <p>
-        Last sign-in: March 7, 2026 at 4:32 PM &nbsp;
-        <span class="verified-badge">
-          <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 0L1 3v5c0 4.25 3 7.4 7 8 4-.6 7-3.75 7-8V3L8 0zm-1 11.4l-3.5-3.5 1.41-1.41L7 8.58l4.09-4.09L12.5 5.9 7 11.4z"/></svg>
-          Argus Verified
-        </span>
-      </p>
-    </div>
-
-    <p class="section-title">Your Accounts</p>
-    <div class="accounts">
-      <div class="account-card">
-        <div>
-          <div class="account-name">Premier Checking</div>
-          <div class="account-number">&bull;&bull;&bull;&bull; 4817</div>
-        </div>
-        <div class="account-balance">
-          <div class="balance-label">Available Balance</div>
-          <div class="balance-amount">$12,847.33</div>
-        </div>
-      </div>
-      <div class="account-card">
-        <div>
-          <div class="account-name">High-Yield Savings</div>
-          <div class="account-number">&bull;&bull;&bull;&bull; 9203</div>
-        </div>
-        <div class="account-balance">
-          <div class="balance-label">Available Balance</div>
-          <div class="balance-amount">$54,219.07</div>
-        </div>
-      </div>
-      <div class="account-card">
-        <div>
-          <div class="account-name">Platinum Visa</div>
-          <div class="account-number">&bull;&bull;&bull;&bull; 6641</div>
-        </div>
-        <div class="account-balance">
-          <div class="balance-label">Current Balance</div>
-          <div class="balance-amount" style="color: var(--negative);">-$2,314.50</div>
-        </div>
-      </div>
-    </div>
-
-    <p class="section-title">Recent Transactions &mdash; Premier Checking</p>
-    <div class="transactions">
-      <div class="tx-header"><span>Description</span><span>Amount</span></div>
-      <div class="tx-row">
-        <div class="tx-desc"><div class="merchant">Whole Foods Market</div><div class="date">Mar 7, 2026</div></div>
-        <div class="tx-amount debit">-$87.42</div>
-      </div>
-      <div class="tx-row">
-        <div class="tx-desc"><div class="merchant">Direct Deposit — Acme Corp</div><div class="date">Mar 6, 2026</div></div>
-        <div class="tx-amount credit">+$3,250.00</div>
-      </div>
-      <div class="tx-row">
-        <div class="tx-desc"><div class="merchant">Netflix</div><div class="date">Mar 5, 2026</div></div>
-        <div class="tx-amount debit">-$15.99</div>
-      </div>
-      <div class="tx-row">
-        <div class="tx-desc"><div class="merchant">Shell Gas Station</div><div class="date">Mar 4, 2026</div></div>
-        <div class="tx-amount debit">-$52.18</div>
-      </div>
-      <div class="tx-row">
-        <div class="tx-desc"><div class="merchant">Transfer from Savings</div><div class="date">Mar 3, 2026</div></div>
-        <div class="tx-amount credit">+$500.00</div>
-      </div>
-      <div class="tx-row">
-        <div class="tx-desc"><div class="merchant">Amazon.com</div><div class="date">Mar 2, 2026</div></div>
-        <div class="tx-amount debit">-$134.97</div>
-      </div>
-      <div class="tx-row">
-        <div class="tx-desc"><div class="merchant">Starbucks</div><div class="date">Mar 1, 2026</div></div>
-        <div class="tx-amount debit">-$6.45</div>
-      </div>
-    </div>
-  </main>
-
-  <footer class="footer">
-    Lone Star National Bank, N.A. &bull; Equal Housing Lender<br />
-    <a href="#">Privacy Policy</a> &bull; <a href="#">Terms of Service</a> &bull; <a href="#">Security</a><br />
-    &copy; 2026 Lone Star National. All rights reserved. This is a demo site.
-  </footer>
-
-  <script>
-    (async function () {
-      var gate = document.getElementById('gate');
-      var gateMsg = document.getElementById('gate-msg');
-      var dashboard = document.getElementById('dashboard');
-      var signOut = document.getElementById('sign-out');
-
-      signOut.addEventListener('click', function (e) {
-        e.preventDefault();
-        sessionStorage.removeItem('argus_token');
-        window.location.href = '/';
-      });
-
-      var token = sessionStorage.getItem('argus_token');
-      if (!token) {
-        gateMsg.textContent = 'Session expired. Redirecting to sign in...';
-        setTimeout(function () { window.location.href = '/'; }, 1500);
-        return;
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>My Accounts — Lone Star National Bank</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Inter:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      :root {
+        --navy: #0c1b33;
+        --navy-light: #162d50;
+        --gold: #c9a84c;
+        --cream: #faf8f4;
+        --cream-dark: #f0ece4;
+        --text: #1a1a2e;
+        --text-secondary: #5a5a6e;
+        --text-muted: #8a8a9a;
+        --border: #ddd8cc;
+        --white: #ffffff;
+        --positive: #2d7a3a;
+        --negative: #b33a3a;
+      }
+      body {
+        font-family:
+          'Inter',
+          -apple-system,
+          BlinkMacSystemFont,
+          'Segoe UI',
+          sans-serif;
+        background: var(--cream);
+        color: var(--text);
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
       }
 
-      try {
-        var res = await fetch('/api/verify', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token: token }),
-        });
-        var data = await res.json();
+      /* ── Header ─────────────────────────────────────────────── */
+      .header {
+        background: var(--navy);
+        color: var(--white);
+      }
+      .header-top {
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 1rem 1.5rem;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .logo {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+      }
+      .logo-star {
+        width: 32px;
+        height: 32px;
+      }
+      .logo-text {
+        font-family: 'Playfair Display', Georgia, serif;
+        font-size: 1.1rem;
+        font-weight: 700;
+        line-height: 1.15;
+      }
+      .logo-text span {
+        display: block;
+        font-size: 0.55rem;
+        font-family: 'Inter', sans-serif;
+        font-weight: 500;
+        letter-spacing: 0.15em;
+        text-transform: uppercase;
+        color: var(--gold);
+      }
+      .header-right {
+        display: flex;
+        align-items: center;
+        gap: 1.25rem;
+        font-size: 0.8rem;
+      }
+      .header-right .greeting {
+        color: rgba(255, 255, 255, 0.8);
+      }
+      .header-right a {
+        color: var(--gold);
+        text-decoration: none;
+        font-weight: 500;
+      }
+      .header-right a:hover {
+        text-decoration: underline;
+      }
+      .header-bar {
+        background: var(--gold);
+        height: 3px;
+      }
 
-        if (data.success) {
-          gate.style.display = 'none';
-          dashboard.style.display = 'block';
-        } else {
-          sessionStorage.removeItem('argus_token');
-          gateMsg.textContent = 'Session invalid. Redirecting to sign in...';
-          setTimeout(function () { window.location.href = '/'; }, 1500);
+      /* ── Loading / Auth gate ───────────────────────────────── */
+      .gate {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 2rem;
+      }
+      .gate p {
+        color: var(--text-muted);
+        font-size: 0.9rem;
+      }
+
+      /* ── Dashboard ─────────────────────────────────────────── */
+      .dashboard {
+        flex: 1;
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 2rem 1.5rem;
+        width: 100%;
+        display: none;
+      }
+      .welcome {
+        margin-bottom: 1.5rem;
+        padding-bottom: 1rem;
+        border-bottom: 1px solid var(--border);
+      }
+      .welcome h1 {
+        font-family: 'Playfair Display', Georgia, serif;
+        font-size: 1.5rem;
+        font-weight: 600;
+        color: var(--navy);
+        margin-bottom: 0.25rem;
+      }
+      .welcome p {
+        font-size: 0.825rem;
+        color: var(--text-secondary);
+      }
+
+      .section-title {
+        font-size: 0.7rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--text-muted);
+        margin-bottom: 0.75rem;
+      }
+
+      /* ── Account cards ──────────────────────────────────────── */
+      .accounts {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+        margin-bottom: 2rem;
+      }
+      .account-card {
+        background: var(--white);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 1.25rem 1.5rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+      }
+      .account-name {
+        font-weight: 600;
+        font-size: 0.9rem;
+        margin-bottom: 0.15rem;
+      }
+      .account-number {
+        font-size: 0.75rem;
+        color: var(--text-muted);
+      }
+      .account-balance {
+        text-align: right;
+      }
+      .balance-label {
+        font-size: 0.65rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--text-muted);
+        margin-bottom: 0.15rem;
+      }
+      .balance-amount {
+        font-size: 1.35rem;
+        font-weight: 600;
+        color: var(--navy);
+      }
+      @media (max-width: 480px) {
+        .account-card {
+          padding: 1rem;
         }
-      } catch (err) {
-        gateMsg.textContent = 'Connection error. Please try again.';
+        .balance-amount {
+          font-size: 1.1rem;
+        }
       }
-    })();
-  </script>
-</body>
+
+      /* ── Transactions ───────────────────────────────────────── */
+      .transactions {
+        background: var(--white);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        overflow: hidden;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+      }
+      .tx-header {
+        padding: 0.85rem 1.25rem;
+        background: var(--cream-dark);
+        font-size: 0.7rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--text-secondary);
+        display: flex;
+        justify-content: space-between;
+      }
+      .tx-row {
+        padding: 0.75rem 1.25rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        border-top: 1px solid var(--cream-dark);
+        font-size: 0.85rem;
+      }
+      .tx-row:first-child {
+        border-top: none;
+      }
+      .tx-desc {
+        flex: 1;
+      }
+      .tx-desc .merchant {
+        font-weight: 500;
+      }
+      .tx-desc .date {
+        font-size: 0.7rem;
+        color: var(--text-muted);
+        margin-top: 0.1rem;
+      }
+      .tx-amount {
+        font-weight: 600;
+        white-space: nowrap;
+        margin-left: 1rem;
+      }
+      .tx-amount.debit {
+        color: var(--text);
+      }
+      .tx-amount.credit {
+        color: var(--positive);
+      }
+
+      /* ── Footer ─────────────────────────────────────────────── */
+      .footer {
+        text-align: center;
+        padding: 1.5rem 1rem;
+        font-size: 0.7rem;
+        color: var(--text-muted);
+        line-height: 1.7;
+      }
+      .footer a {
+        color: var(--text-secondary);
+        text-decoration: none;
+      }
+      .footer a:hover {
+        text-decoration: underline;
+      }
+
+      .verified-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        background: #e8f5e9;
+        color: var(--positive);
+        font-size: 0.7rem;
+        font-weight: 600;
+        padding: 0.25rem 0.6rem;
+        border-radius: 4px;
+      }
+      .verified-badge svg {
+        width: 12px;
+        height: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <header class="header">
+      <div class="header-top">
+        <div class="logo">
+          <svg class="logo-star" viewBox="0 0 40 40" fill="none">
+            <path
+              d="M20 2l4.9 11.1L37 15.5l-8.8 8 2.6 12.5L20 30.2 9.2 36l2.6-12.5-8.8-8 12.1-2.4L20 2z"
+              fill="#c9a84c"
+            />
+            <path
+              d="M20 8l3 6.8 7.4 1.5-5.4 4.9 1.6 7.6L20 25l-6.6 3.8 1.6-7.6-5.4-4.9 7.4-1.5L20 8z"
+              fill="#0c1b33"
+            />
+          </svg>
+          <div class="logo-text">Lone Star National<span>Online Banking</span></div>
+        </div>
+        <div class="header-right">
+          <span class="greeting">Welcome, Sarah</span>
+          <a href="/" id="sign-out">Sign Out</a>
+        </div>
+      </div>
+      <div class="header-bar"></div>
+    </header>
+
+    <div class="gate" id="gate">
+      <p id="gate-msg">Verifying session...</p>
+    </div>
+
+    <main class="dashboard" id="dashboard">
+      <div class="welcome">
+        <h1>Good morning, Sarah.</h1>
+        <p>
+          Last sign-in: March 7, 2026 at 4:32 PM &nbsp;
+          <span class="verified-badge">
+            <svg viewBox="0 0 16 16" fill="currentColor">
+              <path
+                d="M8 0L1 3v5c0 4.25 3 7.4 7 8 4-.6 7-3.75 7-8V3L8 0zm-1 11.4l-3.5-3.5 1.41-1.41L7 8.58l4.09-4.09L12.5 5.9 7 11.4z"
+              />
+            </svg>
+            Argus Verified
+          </span>
+        </p>
+      </div>
+
+      <p class="section-title">Your Accounts</p>
+      <div class="accounts">
+        <div class="account-card">
+          <div>
+            <div class="account-name">Premier Checking</div>
+            <div class="account-number">&bull;&bull;&bull;&bull; 4817</div>
+          </div>
+          <div class="account-balance">
+            <div class="balance-label">Available Balance</div>
+            <div class="balance-amount">$12,847.33</div>
+          </div>
+        </div>
+        <div class="account-card">
+          <div>
+            <div class="account-name">High-Yield Savings</div>
+            <div class="account-number">&bull;&bull;&bull;&bull; 9203</div>
+          </div>
+          <div class="account-balance">
+            <div class="balance-label">Available Balance</div>
+            <div class="balance-amount">$54,219.07</div>
+          </div>
+        </div>
+        <div class="account-card">
+          <div>
+            <div class="account-name">Platinum Visa</div>
+            <div class="account-number">&bull;&bull;&bull;&bull; 6641</div>
+          </div>
+          <div class="account-balance">
+            <div class="balance-label">Current Balance</div>
+            <div class="balance-amount" style="color: var(--negative)">-$2,314.50</div>
+          </div>
+        </div>
+      </div>
+
+      <p class="section-title">Recent Transactions &mdash; Premier Checking</p>
+      <div class="transactions">
+        <div class="tx-header"><span>Description</span><span>Amount</span></div>
+        <div class="tx-row">
+          <div class="tx-desc">
+            <div class="merchant">Whole Foods Market</div>
+            <div class="date">Mar 7, 2026</div>
+          </div>
+          <div class="tx-amount debit">-$87.42</div>
+        </div>
+        <div class="tx-row">
+          <div class="tx-desc">
+            <div class="merchant">Direct Deposit — Acme Corp</div>
+            <div class="date">Mar 6, 2026</div>
+          </div>
+          <div class="tx-amount credit">+$3,250.00</div>
+        </div>
+        <div class="tx-row">
+          <div class="tx-desc">
+            <div class="merchant">Netflix</div>
+            <div class="date">Mar 5, 2026</div>
+          </div>
+          <div class="tx-amount debit">-$15.99</div>
+        </div>
+        <div class="tx-row">
+          <div class="tx-desc">
+            <div class="merchant">Shell Gas Station</div>
+            <div class="date">Mar 4, 2026</div>
+          </div>
+          <div class="tx-amount debit">-$52.18</div>
+        </div>
+        <div class="tx-row">
+          <div class="tx-desc">
+            <div class="merchant">Transfer from Savings</div>
+            <div class="date">Mar 3, 2026</div>
+          </div>
+          <div class="tx-amount credit">+$500.00</div>
+        </div>
+        <div class="tx-row">
+          <div class="tx-desc">
+            <div class="merchant">Amazon.com</div>
+            <div class="date">Mar 2, 2026</div>
+          </div>
+          <div class="tx-amount debit">-$134.97</div>
+        </div>
+        <div class="tx-row">
+          <div class="tx-desc">
+            <div class="merchant">Starbucks</div>
+            <div class="date">Mar 1, 2026</div>
+          </div>
+          <div class="tx-amount debit">-$6.45</div>
+        </div>
+      </div>
+    </main>
+
+    <footer class="footer">
+      Lone Star National Bank, N.A. &bull; Equal Housing Lender<br />
+      <a href="#">Privacy Policy</a> &bull; <a href="#">Terms of Service</a> &bull;
+      <a href="#">Security</a><br />
+      &copy; 2026 Lone Star National. All rights reserved. This is a demo site.
+    </footer>
+
+    <script>
+      (async function () {
+        var gate = document.getElementById('gate');
+        var gateMsg = document.getElementById('gate-msg');
+        var dashboard = document.getElementById('dashboard');
+        var signOut = document.getElementById('sign-out');
+
+        signOut.addEventListener('click', function (e) {
+          e.preventDefault();
+          sessionStorage.removeItem('argus_token');
+          window.location.href = '/';
+        });
+
+        var token = sessionStorage.getItem('argus_token');
+        if (!token) {
+          gateMsg.textContent = 'Session expired. Redirecting to sign in...';
+          setTimeout(function () {
+            window.location.href = '/';
+          }, 1500);
+          return;
+        }
+
+        try {
+          var res = await fetch('/api/verify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: token }),
+          });
+          var data = await res.json();
+
+          if (data.success) {
+            gate.style.display = 'none';
+            dashboard.style.display = 'block';
+          } else {
+            sessionStorage.removeItem('argus_token');
+            gateMsg.textContent = 'Session invalid. Redirecting to sign in...';
+            setTimeout(function () {
+              window.location.href = '/';
+            }, 1500);
+          }
+        } catch (err) {
+          gateMsg.textContent = 'Connection error. Please try again.';
+        }
+      })();
+    </script>
+  </body>
 </html>

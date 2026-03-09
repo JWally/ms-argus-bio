@@ -1,435 +1,503 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>Lone Star National Bank — Online Banking</title>
-  <link rel="preconnect" href="https://bio-dev-jw.argus.pw" />
-  <link rel="dns-prefetch" href="https://bio-dev-jw.argus.pw" />
-  <link rel="preconnect" href="https://api-bio-dev-jw.argus.pw" />
-  <link rel="dns-prefetch" href="https://api-bio-dev-jw.argus.pw" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
-  <script src="https://bio-dev-jw.argus.pw/argus-bio.js"></script>
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    :root {
-      --navy: #0c1b33;
-      --navy-light: #162d50;
-      --gold: #c9a84c;
-      --gold-hover: #dabb5e;
-      --gold-dim: rgba(201, 168, 76, 0.15);
-      --cream: #faf8f4;
-      --cream-dark: #f0ece4;
-      --text: #1a1a2e;
-      --text-secondary: #5a5a6e;
-      --text-muted: #8a8a9a;
-      --border: #ddd8cc;
-      --white: #ffffff;
-      --positive: #2d7a3a;
-      --negative: #b33a3a;
-    }
-    html { scroll-behavior: smooth; }
-    body {
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: var(--cream);
-      color: var(--text);
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-    }
-
-    /* ── Header ─────────────────────────────────────────────────── */
-    .header {
-      background: var(--navy);
-      color: var(--white);
-      padding: 0;
-    }
-    .header-top {
-      max-width: 1100px;
-      margin: 0 auto;
-      padding: 1.25rem 1.5rem;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-    .logo {
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-    }
-    .logo-star {
-      width: 40px;
-      height: 40px;
-      flex-shrink: 0;
-    }
-    .logo-text {
-      font-family: 'Playfair Display', Georgia, serif;
-      font-size: 1.35rem;
-      font-weight: 700;
-      letter-spacing: -0.01em;
-      line-height: 1.15;
-    }
-    .logo-text span {
-      display: block;
-      font-size: 0.65rem;
-      font-family: 'Inter', sans-serif;
-      font-weight: 500;
-      letter-spacing: 0.15em;
-      text-transform: uppercase;
-      color: var(--gold);
-      margin-top: 2px;
-    }
-    .header-links {
-      display: flex;
-      gap: 1.5rem;
-      font-size: 0.8rem;
-      color: rgba(255,255,255,0.7);
-    }
-    .header-links a {
-      color: inherit;
-      text-decoration: none;
-      transition: color 0.15s;
-    }
-    .header-links a:hover { color: var(--gold); }
-    @media (max-width: 600px) {
-      .header-links { display: none; }
-      .logo-text { font-size: 1.15rem; }
-    }
-    .header-bar {
-      background: var(--gold);
-      height: 3px;
-    }
-
-    /* ── Main ───────────────────────────────────────────────────── */
-    .main {
-      flex: 1;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 2rem 1rem;
-    }
-    .login-container {
-      width: 100%;
-      max-width: 420px;
-    }
-
-    /* ── Card ───────────────────────────────────────────────────── */
-    .card {
-      background: var(--white);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 2.25rem 2rem;
-      box-shadow: 0 1px 4px rgba(0,0,0,0.06), 0 8px 24px rgba(0,0,0,0.04);
-    }
-    @media (max-width: 480px) {
-      .card { padding: 1.75rem 1.25rem; }
-    }
-    .card-header {
-      text-align: center;
-      margin-bottom: 1.75rem;
-    }
-    .card-header h1 {
-      font-family: 'Playfair Display', Georgia, serif;
-      font-size: 1.4rem;
-      font-weight: 600;
-      color: var(--navy);
-      margin-bottom: 0.35rem;
-    }
-    .card-header p {
-      font-size: 0.825rem;
-      color: var(--text-secondary);
-    }
-
-    /* ── Form ───────────────────────────────────────────────────── */
-    .form-group {
-      margin-bottom: 1rem;
-    }
-    .form-group label {
-      display: block;
-      font-size: 0.775rem;
-      font-weight: 600;
-      color: var(--text-secondary);
-      margin-bottom: 0.4rem;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-    }
-    .form-group input {
-      width: 100%;
-      padding: 0.7rem 0.85rem;
-      border: 1.5px solid var(--border);
-      border-radius: 8px;
-      font-size: 0.9rem;
-      font-family: inherit;
-      color: var(--text);
-      background: var(--white);
-      transition: border-color 0.15s, box-shadow 0.15s;
-      outline: none;
-    }
-    .form-group input:focus {
-      border-color: var(--gold);
-      box-shadow: 0 0 0 3px var(--gold-dim);
-    }
-    .form-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin: 1rem 0 0.25rem;
-    }
-    .remember {
-      display: flex;
-      align-items: center;
-      gap: 0.4rem;
-      font-size: 0.8rem;
-      color: var(--text-secondary);
-      cursor: pointer;
-    }
-    .remember input {
-      accent-color: var(--gold);
-      width: 15px;
-      height: 15px;
-    }
-    .forgot {
-      font-size: 0.8rem;
-      color: var(--gold);
-      text-decoration: none;
-      font-weight: 500;
-    }
-    .forgot:hover { text-decoration: underline; }
-
-    /* ── Button ──────────────────────────────────────────────────── */
-    .btn-primary {
-      width: 100%;
-      padding: 0.8rem;
-      border: none;
-      border-radius: 8px;
-      background: var(--navy);
-      color: var(--white);
-      font-size: 0.875rem;
-      font-weight: 600;
-      font-family: inherit;
-      cursor: pointer;
-      margin-top: 1.25rem;
-      transition: background 0.15s;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 0.5rem;
-    }
-    .btn-primary:hover { background: var(--navy-light); }
-    .btn-primary:disabled { opacity: 0.55; cursor: not-allowed; }
-
-    .lock-icon {
-      width: 14px;
-      height: 14px;
-      opacity: 0.7;
-    }
-
-    /* ── Status ──────────────────────────────────────────────────── */
-    .status {
-      text-align: center;
-      font-size: 0.8rem;
-      color: var(--text-muted);
-      margin-top: 0.75rem;
-      min-height: 1.2em;
-    }
-    .status.success { color: var(--positive); font-weight: 600; }
-    .status.error { color: var(--negative); }
-
-    /* ── Divider ─────────────────────────────────────────────────── */
-    .divider {
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-      margin: 1.5rem 0;
-      font-size: 0.7rem;
-      color: var(--text-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-    }
-    .divider::before, .divider::after {
-      content: '';
-      flex: 1;
-      height: 1px;
-      background: var(--border);
-    }
-
-    /* ── Secondary actions ───────────────────────────────────────── */
-    .secondary {
-      text-align: center;
-      font-size: 0.8rem;
-      color: var(--text-secondary);
-    }
-    .secondary a {
-      color: var(--navy);
-      font-weight: 600;
-      text-decoration: none;
-    }
-    .secondary a:hover { text-decoration: underline; }
-
-    /* ── Security badge ──────────────────────────────────────────── */
-    .security-badge {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 0.5rem;
-      margin-top: 1.5rem;
-      font-size: 0.7rem;
-      color: var(--text-muted);
-    }
-    .security-badge svg {
-      width: 12px;
-      height: 12px;
-      opacity: 0.5;
-    }
-
-    /* ── Footer ──────────────────────────────────────────────────── */
-    .footer {
-      text-align: center;
-      padding: 1.5rem 1rem;
-      font-size: 0.7rem;
-      color: var(--text-muted);
-      line-height: 1.7;
-    }
-    .footer a {
-      color: var(--text-secondary);
-      text-decoration: none;
-    }
-    .footer a:hover { text-decoration: underline; }
-  </style>
-</head>
-<body>
-
-  <!-- Header -->
-  <header class="header">
-    <div class="header-top">
-      <div class="logo">
-        <svg class="logo-star" viewBox="0 0 40 40" fill="none">
-          <path d="M20 2l4.9 11.1L37 15.5l-8.8 8 2.6 12.5L20 30.2 9.2 36l2.6-12.5-8.8-8 12.1-2.4L20 2z" fill="#c9a84c" />
-          <path d="M20 8l3 6.8 7.4 1.5-5.4 4.9 1.6 7.6L20 25l-6.6 3.8 1.6-7.6-5.4-4.9 7.4-1.5L20 8z" fill="#0c1b33" />
-        </svg>
-        <div class="logo-text">
-          Lone Star National
-          <span>Est. 1887 &bull; Member FDIC</span>
-        </div>
-      </div>
-      <div class="header-links">
-        <a href="#">Personal</a>
-        <a href="#">Business</a>
-        <a href="#">Wealth</a>
-        <a href="#">Locations</a>
-      </div>
-    </div>
-    <div class="header-bar"></div>
-  </header>
-
-  <!-- Main -->
-  <main class="main">
-    <div class="login-container">
-      <div class="card">
-        <div class="card-header">
-          <h1>Online Banking Sign In</h1>
-          <p>Access your accounts securely.</p>
-        </div>
-
-        <div class="form-group">
-          <label for="username">Username</label>
-          <input type="text" id="username" placeholder="Enter your username" autocomplete="username" />
-        </div>
-        <div class="form-group">
-          <label for="password">Password</label>
-          <input type="password" id="password" placeholder="Enter your password" autocomplete="current-password" />
-        </div>
-
-        <div class="form-row">
-          <label class="remember">
-            <input type="checkbox" checked /> Remember me
-          </label>
-          <a href="#" class="forgot">Forgot password?</a>
-        </div>
-
-        <button class="btn-primary" id="login-btn" onclick="startVerification()">
-          <svg class="lock-icon" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M8 1a4 4 0 0 0-4 4v2H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1h-1V5a4 4 0 0 0-4-4zm2.5 6h-5V5a2.5 2.5 0 0 1 5 0v2z"/>
-          </svg>
-          Secure Sign In
-        </button>
-
-        <p id="status" class="status"></p>
-
-        <div class="divider">or</div>
-
-        <p class="secondary">
-          New to Lone Star? <a href="#">Open an account</a>
-        </p>
-
-        <div class="security-badge">
-          <svg viewBox="0 0 16 16" fill="currentColor">
-            <path d="M8 0L1 3v5c0 4.25 3 7.4 7 8 4-.6 7-3.75 7-8V3L8 0zm0 2.18l5 2.14v3.96c0 3.31-2.19 5.85-5 6.53-2.81-.68-5-3.22-5-6.53V4.32l5-2.14z"/>
-            <path d="M7 10.4l-2.5-2.5 1.06-1.06L7 8.28l3.44-3.44 1.06 1.06L7 10.4z"/>
-          </svg>
-          256-bit encryption &bull; Protected by Argus Bio
-        </div>
-      </div>
-
-      <footer class="footer">
-        Lone Star National Bank, N.A. &bull; Equal Housing Lender<br />
-        <a href="#">Privacy Policy</a> &bull; <a href="#">Terms of Service</a> &bull; <a href="#">Security</a><br />
-        &copy; 2026 Lone Star National. All rights reserved. This is a demo site.
-      </footer>
-    </div>
-  </main>
-
-  <script>
-    var btn = document.getElementById('login-btn');
-    var status = document.getElementById('status');
-
-    async function startVerification() {
-      btn.disabled = true;
-      status.className = 'status';
-      status.textContent = 'Verifying identity...';
-
-      try {
-        var res = await fetch('/api/session', { method: 'POST' });
-        var data = await res.json();
-
-        if (data.error) {
-          status.className = 'status error';
-          status.textContent = data.error;
-          btn.disabled = false;
-          return;
-        }
-
-        status.textContent = 'Complete the security check...';
-
-        ArgusBio.open({
-          sessionId: data.sessionId,
-          onVerified: function (token) {
-            status.className = 'status success';
-            status.textContent = 'Identity verified. Signing in...';
-            sessionStorage.setItem('argus_token', token);
-            setTimeout(function () { window.location.href = '/dashboard.html'; }, 600);
-          },
-          onError: function (err) {
-            status.className = 'status error';
-            status.textContent = 'Verification failed: ' + err;
-            btn.disabled = false;
-            btn.innerHTML = '<svg class="lock-icon" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a4 4 0 0 0-4 4v2H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1h-1V5a4 4 0 0 0-4-4zm2.5 6h-5V5a2.5 2.5 0 0 1 5 0v2z"/></svg> Secure Sign In';
-          },
-          onClose: function () {
-            status.className = 'status';
-            status.textContent = '';
-            btn.disabled = false;
-            btn.innerHTML = '<svg class="lock-icon" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a4 4 0 0 0-4 4v2H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1h-1V5a4 4 0 0 0-4-4zm2.5 6h-5V5a2.5 2.5 0 0 1 5 0v2z"/></svg> Secure Sign In';
-          },
-        });
-      } catch (err) {
-        status.className = 'status error';
-        status.textContent = 'Connection error. Please try again.';
-        btn.disabled = false;
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+    />
+    <title>Lone Star National Bank — Online Banking</title>
+    <link rel="preconnect" href="https://bio-dev-jw.argus.pw" />
+    <link rel="dns-prefetch" href="https://bio-dev-jw.argus.pw" />
+    <link rel="preconnect" href="https://api-bio-dev-jw.argus.pw" />
+    <link rel="dns-prefetch" href="https://api-bio-dev-jw.argus.pw" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Inter:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://bio-dev-jw.argus.pw/argus-bio.js"></script>
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
       }
-    }
-  </script>
-</body>
+      :root {
+        --navy: #0c1b33;
+        --navy-light: #162d50;
+        --gold: #c9a84c;
+        --gold-hover: #dabb5e;
+        --gold-dim: rgba(201, 168, 76, 0.15);
+        --cream: #faf8f4;
+        --cream-dark: #f0ece4;
+        --text: #1a1a2e;
+        --text-secondary: #5a5a6e;
+        --text-muted: #8a8a9a;
+        --border: #ddd8cc;
+        --white: #ffffff;
+        --positive: #2d7a3a;
+        --negative: #b33a3a;
+      }
+      html {
+        scroll-behavior: smooth;
+      }
+      body {
+        font-family:
+          'Inter',
+          -apple-system,
+          BlinkMacSystemFont,
+          'Segoe UI',
+          sans-serif;
+        background: var(--cream);
+        color: var(--text);
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+
+      /* ── Header ─────────────────────────────────────────────────── */
+      .header {
+        background: var(--navy);
+        color: var(--white);
+        padding: 0;
+      }
+      .header-top {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 1.25rem 1.5rem;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .logo {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+      }
+      .logo-star {
+        width: 40px;
+        height: 40px;
+        flex-shrink: 0;
+      }
+      .logo-text {
+        font-family: 'Playfair Display', Georgia, serif;
+        font-size: 1.35rem;
+        font-weight: 700;
+        letter-spacing: -0.01em;
+        line-height: 1.15;
+      }
+      .logo-text span {
+        display: block;
+        font-size: 0.65rem;
+        font-family: 'Inter', sans-serif;
+        font-weight: 500;
+        letter-spacing: 0.15em;
+        text-transform: uppercase;
+        color: var(--gold);
+        margin-top: 2px;
+      }
+      .header-links {
+        display: flex;
+        gap: 1.5rem;
+        font-size: 0.8rem;
+        color: rgba(255, 255, 255, 0.7);
+      }
+      .header-links a {
+        color: inherit;
+        text-decoration: none;
+        transition: color 0.15s;
+      }
+      .header-links a:hover {
+        color: var(--gold);
+      }
+      @media (max-width: 600px) {
+        .header-links {
+          display: none;
+        }
+        .logo-text {
+          font-size: 1.15rem;
+        }
+      }
+      .header-bar {
+        background: var(--gold);
+        height: 3px;
+      }
+
+      /* ── Main ───────────────────────────────────────────────────── */
+      .main {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 2rem 1rem;
+      }
+      .login-container {
+        width: 100%;
+        max-width: 420px;
+      }
+
+      /* ── Card ───────────────────────────────────────────────────── */
+      .card {
+        background: var(--white);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 2.25rem 2rem;
+        box-shadow:
+          0 1px 4px rgba(0, 0, 0, 0.06),
+          0 8px 24px rgba(0, 0, 0, 0.04);
+      }
+      @media (max-width: 480px) {
+        .card {
+          padding: 1.75rem 1.25rem;
+        }
+      }
+      .card-header {
+        text-align: center;
+        margin-bottom: 1.75rem;
+      }
+      .card-header h1 {
+        font-family: 'Playfair Display', Georgia, serif;
+        font-size: 1.4rem;
+        font-weight: 600;
+        color: var(--navy);
+        margin-bottom: 0.35rem;
+      }
+      .card-header p {
+        font-size: 0.825rem;
+        color: var(--text-secondary);
+      }
+
+      /* ── Form ───────────────────────────────────────────────────── */
+      .form-group {
+        margin-bottom: 1rem;
+      }
+      .form-group label {
+        display: block;
+        font-size: 0.775rem;
+        font-weight: 600;
+        color: var(--text-secondary);
+        margin-bottom: 0.4rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .form-group input {
+        width: 100%;
+        padding: 0.7rem 0.85rem;
+        border: 1.5px solid var(--border);
+        border-radius: 8px;
+        font-size: 0.9rem;
+        font-family: inherit;
+        color: var(--text);
+        background: var(--white);
+        transition:
+          border-color 0.15s,
+          box-shadow 0.15s;
+        outline: none;
+      }
+      .form-group input:focus {
+        border-color: var(--gold);
+        box-shadow: 0 0 0 3px var(--gold-dim);
+      }
+      .form-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin: 1rem 0 0.25rem;
+      }
+      .remember {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        font-size: 0.8rem;
+        color: var(--text-secondary);
+        cursor: pointer;
+      }
+      .remember input {
+        accent-color: var(--gold);
+        width: 15px;
+        height: 15px;
+      }
+      .forgot {
+        font-size: 0.8rem;
+        color: var(--gold);
+        text-decoration: none;
+        font-weight: 500;
+      }
+      .forgot:hover {
+        text-decoration: underline;
+      }
+
+      /* ── Button ──────────────────────────────────────────────────── */
+      .btn-primary {
+        width: 100%;
+        padding: 0.8rem;
+        border: none;
+        border-radius: 8px;
+        background: var(--navy);
+        color: var(--white);
+        font-size: 0.875rem;
+        font-weight: 600;
+        font-family: inherit;
+        cursor: pointer;
+        margin-top: 1.25rem;
+        transition: background 0.15s;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+      }
+      .btn-primary:hover {
+        background: var(--navy-light);
+      }
+      .btn-primary:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+      }
+
+      .lock-icon {
+        width: 14px;
+        height: 14px;
+        opacity: 0.7;
+      }
+
+      /* ── Status ──────────────────────────────────────────────────── */
+      .status {
+        text-align: center;
+        font-size: 0.8rem;
+        color: var(--text-muted);
+        margin-top: 0.75rem;
+        min-height: 1.2em;
+      }
+      .status.success {
+        color: var(--positive);
+        font-weight: 600;
+      }
+      .status.error {
+        color: var(--negative);
+      }
+
+      /* ── Divider ─────────────────────────────────────────────────── */
+      .divider {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        margin: 1.5rem 0;
+        font-size: 0.7rem;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+      .divider::before,
+      .divider::after {
+        content: '';
+        flex: 1;
+        height: 1px;
+        background: var(--border);
+      }
+
+      /* ── Secondary actions ───────────────────────────────────────── */
+      .secondary {
+        text-align: center;
+        font-size: 0.8rem;
+        color: var(--text-secondary);
+      }
+      .secondary a {
+        color: var(--navy);
+        font-weight: 600;
+        text-decoration: none;
+      }
+      .secondary a:hover {
+        text-decoration: underline;
+      }
+
+      /* ── Security badge ──────────────────────────────────────────── */
+      .security-badge {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+        margin-top: 1.5rem;
+        font-size: 0.7rem;
+        color: var(--text-muted);
+      }
+      .security-badge svg {
+        width: 12px;
+        height: 12px;
+        opacity: 0.5;
+      }
+
+      /* ── Footer ──────────────────────────────────────────────────── */
+      .footer {
+        text-align: center;
+        padding: 1.5rem 1rem;
+        font-size: 0.7rem;
+        color: var(--text-muted);
+        line-height: 1.7;
+      }
+      .footer a {
+        color: var(--text-secondary);
+        text-decoration: none;
+      }
+      .footer a:hover {
+        text-decoration: underline;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Header -->
+    <header class="header">
+      <div class="header-top">
+        <div class="logo">
+          <svg class="logo-star" viewBox="0 0 40 40" fill="none">
+            <path
+              d="M20 2l4.9 11.1L37 15.5l-8.8 8 2.6 12.5L20 30.2 9.2 36l2.6-12.5-8.8-8 12.1-2.4L20 2z"
+              fill="#c9a84c"
+            />
+            <path
+              d="M20 8l3 6.8 7.4 1.5-5.4 4.9 1.6 7.6L20 25l-6.6 3.8 1.6-7.6-5.4-4.9 7.4-1.5L20 8z"
+              fill="#0c1b33"
+            />
+          </svg>
+          <div class="logo-text">
+            Lone Star National
+            <span>Est. 1887 &bull; Member FDIC</span>
+          </div>
+        </div>
+        <div class="header-links">
+          <a href="#">Personal</a>
+          <a href="#">Business</a>
+          <a href="#">Wealth</a>
+          <a href="#">Locations</a>
+        </div>
+      </div>
+      <div class="header-bar"></div>
+    </header>
+
+    <!-- Main -->
+    <main class="main">
+      <div class="login-container">
+        <div class="card">
+          <div class="card-header">
+            <h1>Online Banking Sign In</h1>
+            <p>Access your accounts securely.</p>
+          </div>
+
+          <div class="form-group">
+            <label for="username">Username</label>
+            <input
+              type="text"
+              id="username"
+              placeholder="Enter your username"
+              autocomplete="username"
+            />
+          </div>
+          <div class="form-group">
+            <label for="password">Password</label>
+            <input
+              type="password"
+              id="password"
+              placeholder="Enter your password"
+              autocomplete="current-password"
+            />
+          </div>
+
+          <div class="form-row">
+            <label class="remember"> <input type="checkbox" checked /> Remember me </label>
+            <a href="#" class="forgot">Forgot password?</a>
+          </div>
+
+          <button class="btn-primary" id="login-btn" onclick="startVerification()">
+            <svg class="lock-icon" viewBox="0 0 16 16" fill="currentColor">
+              <path
+                d="M8 1a4 4 0 0 0-4 4v2H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1h-1V5a4 4 0 0 0-4-4zm2.5 6h-5V5a2.5 2.5 0 0 1 5 0v2z"
+              />
+            </svg>
+            Secure Sign In
+          </button>
+
+          <p id="status" class="status"></p>
+
+          <div class="divider">or</div>
+
+          <p class="secondary">New to Lone Star? <a href="#">Open an account</a></p>
+
+          <div class="security-badge">
+            <svg viewBox="0 0 16 16" fill="currentColor">
+              <path
+                d="M8 0L1 3v5c0 4.25 3 7.4 7 8 4-.6 7-3.75 7-8V3L8 0zm0 2.18l5 2.14v3.96c0 3.31-2.19 5.85-5 6.53-2.81-.68-5-3.22-5-6.53V4.32l5-2.14z"
+              />
+              <path d="M7 10.4l-2.5-2.5 1.06-1.06L7 8.28l3.44-3.44 1.06 1.06L7 10.4z" />
+            </svg>
+            256-bit encryption &bull; Protected by Argus Bio
+          </div>
+        </div>
+
+        <footer class="footer">
+          Lone Star National Bank, N.A. &bull; Equal Housing Lender<br />
+          <a href="#">Privacy Policy</a> &bull; <a href="#">Terms of Service</a> &bull;
+          <a href="#">Security</a><br />
+          &copy; 2026 Lone Star National. All rights reserved. This is a demo site.
+        </footer>
+      </div>
+    </main>
+
+    <script>
+      var btn = document.getElementById('login-btn');
+      var status = document.getElementById('status');
+
+      async function startVerification() {
+        btn.disabled = true;
+        status.className = 'status';
+        status.textContent = 'Verifying identity...';
+
+        try {
+          var res = await fetch('/api/session', { method: 'POST' });
+          var data = await res.json();
+
+          if (data.error) {
+            status.className = 'status error';
+            status.textContent = data.error;
+            btn.disabled = false;
+            return;
+          }
+
+          status.textContent = 'Complete the security check...';
+
+          ArgusBio.open({
+            sessionId: data.sessionId,
+            onVerified: function (token) {
+              status.className = 'status success';
+              status.textContent = 'Identity verified. Signing in...';
+              sessionStorage.setItem('argus_token', token);
+              setTimeout(function () {
+                window.location.href = '/dashboard.html';
+              }, 600);
+            },
+            onError: function (err) {
+              status.className = 'status error';
+              status.textContent = 'Verification failed: ' + err;
+              btn.disabled = false;
+              btn.innerHTML =
+                '<svg class="lock-icon" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a4 4 0 0 0-4 4v2H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1h-1V5a4 4 0 0 0-4-4zm2.5 6h-5V5a2.5 2.5 0 0 1 5 0v2z"/></svg> Secure Sign In';
+            },
+            onClose: function () {
+              status.className = 'status';
+              status.textContent = '';
+              btn.disabled = false;
+              btn.innerHTML =
+                '<svg class="lock-icon" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a4 4 0 0 0-4 4v2H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1h-1V5a4 4 0 0 0-4-4zm2.5 6h-5V5a2.5 2.5 0 0 1 5 0v2z"/></svg> Secure Sign In';
+            },
+          });
+        } catch (err) {
+          status.className = 'status error';
+          status.textContent = 'Connection error. Please try again.';
+          btn.disabled = false;
+        }
+      }
+    </script>
+  </body>
 </html>

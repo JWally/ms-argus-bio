@@ -79,7 +79,13 @@
     os.overscrollBehavior = 'none';
 
     // Prevent touch-scroll bounce on the overlay
-    overlay.addEventListener('touchmove', function (e) { e.preventDefault(); }, { passive: false });
+    overlay.addEventListener(
+      'touchmove',
+      function (e) {
+        e.preventDefault();
+      },
+      { passive: false }
+    );
 
     // Container (responsive sizing)
     var container = document.createElement('div');

@@ -107,11 +107,10 @@ interface FinalResult {
   features: ReturnType<typeof computeFeatures>;
 }
 
-function formatTime(ms: number, compact = false): string {
+function formatTime(ms: number): string {
   const totalSecs = Math.floor(ms / 1000);
   const mins = Math.floor(totalSecs / 60);
   const secs = totalSecs % 60;
-  if (compact) return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   const millis = Math.floor(ms % 1000);
   return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}.${String(millis).padStart(3, '0')}`;
 }
@@ -405,8 +404,8 @@ export default function CaptchaPage() {
       if (!activeRef.current) return;
       const elapsed = performance.now() - startTime;
 
-      // Throttle React state updates to ~4/sec (timer only shows seconds)
-      if (elapsed - lastUiUpdate >= 250) {
+      // Throttle React state updates to ~24/sec
+      if (elapsed - lastUiUpdate >= 42) {
         lastUiUpdate = elapsed;
         setElapsedMs(elapsed);
       }
@@ -648,9 +647,7 @@ export default function CaptchaPage() {
         <main>
           {state !== 'complete' && (
             <>
-              <div className={timerClass}>
-                {formatTime(Math.max(0, TIMEOUT_MS - elapsedMs), isEmbedded())}
-              </div>
+              <div className={timerClass}>{formatTime(Math.max(0, TIMEOUT_MS - elapsedMs))}</div>
 
               <div className="challenge-digits">
                 <DotChallenge
