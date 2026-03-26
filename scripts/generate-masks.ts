@@ -18,7 +18,31 @@ const MASK_W = 64;
 const MASK_H = 48;
 
 // Same glyph set as CaptchaPage.tsx / handler.ts (letters only)
-const GLYPHS = ['A', 'C', 'E', 'F', 'H', 'J', 'K', 'M', 'N', 'P', 'R', 'T', 'W', 'X', 'Y'];
+const GLYPHS = [
+  'A',
+  'B',
+  'C',
+  'E',
+  'F',
+  'G',
+  'H',
+  'I',
+  'J',
+  'K',
+  'L',
+  'M',
+  'N',
+  'O',
+  'P',
+  'R',
+  'S',
+  'T',
+  'U',
+  'W',
+  'X',
+  'Y',
+  'Z',
+];
 
 // Font variants — distinct families produce structurally different letterforms.
 // Each entry: [fontSpec, yOffset] to account for baseline differences.

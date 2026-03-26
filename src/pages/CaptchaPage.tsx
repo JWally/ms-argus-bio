@@ -60,22 +60,31 @@ interface Glyph {
 }
 
 // ── Fallback for local dev without API ──────────────────────────────
+// Excluded: D (too similar to O), Q (too similar to O), V (too similar to U)
 const FALLBACK_LETTERS = [
   'A',
+  'B',
   'C',
   'E',
   'F',
+  'G',
   'H',
+  'I',
   'J',
   'K',
+  'L',
   'M',
   'N',
+  'O',
   'P',
   'R',
+  'S',
   'T',
+  'U',
   'W',
   'X',
   'Y',
+  'Z',
 ];
 
 function generateFallbackChallenge(): Glyph[] {
@@ -376,6 +385,14 @@ export default function CaptchaPage() {
           // eslint-disable-next-line no-console
           console.error('[ARGUS BIO] Classification error', err);
           setVerdict(fallbackVerdict);
+          if (isEmbedded()) {
+            setTimeout(() => {
+              window.parent.postMessage(
+                { type: 'argus-bio-error', error: 'Verification error. Please try again.' },
+                '*'
+              );
+            }, 2000);
+          }
         })
         .finally(() => {
           performance.mark('fetch:classify:end');
@@ -515,27 +532,27 @@ export default function CaptchaPage() {
     const inkPixels = imgData.filter((v) => v > 20).length;
     const INK_THRESHOLD = 15;
 
-    confidenceTimelineRef.current.push({
-      t: Math.round(now - startTimeRef.current),
-      digitIndex: idx,
-      targetConf: 0,
-      topDigit: -1,
-      topConf: 0,
-    });
-
-    allStrokesRef.current.push(...strokes);
-    digitResultsRef.current.push({
-      target: -1, // Hidden — server decrypts from challengeId
-      recognized: -1, // Server validates via EMNIST inference
-      confidence: 0,
-      timeMs: now - glyphStartTimeRef.current,
-      strokes: normalizeStrokes(strokes, startTimeRef.current),
-      imageData: imgData,
-    });
-
     // Client only checks: "did the user draw something?"
     // Server validates correctness via EMNIST inference.
     if (inkPixels >= INK_THRESHOLD) {
+      confidenceTimelineRef.current.push({
+        t: Math.round(now - startTimeRef.current),
+        digitIndex: idx,
+        targetConf: 0,
+        topDigit: -1,
+        topConf: 0,
+      });
+
+      allStrokesRef.current.push(...strokes);
+      digitResultsRef.current.push({
+        target: -1, // Hidden — server decrypts from challengeId
+        recognized: -1, // Server validates via EMNIST inference
+        confidence: 0,
+        timeMs: now - glyphStartTimeRef.current,
+        strokes: normalizeStrokes(strokes, startTimeRef.current),
+        imageData: imgData,
+      });
+
       advance(now);
     } else {
       // Empty canvas — retry with red flash
@@ -603,6 +620,18 @@ export default function CaptchaPage() {
     }, 1500);
     return () => clearTimeout(id);
   }, [argusToken]);
+
+  // Post error to parent when verdict arrives without a token (failed/timeout)
+  useEffect(() => {
+    if (!verdict || argusToken || !isEmbedded()) return;
+    const id = setTimeout(() => {
+      window.parent.postMessage(
+        { type: 'argus-bio-error', error: 'Verification failed. Please try again.' },
+        '*'
+      );
+    }, 2000);
+    return () => clearTimeout(id);
+  }, [verdict, argusToken]);
 
   const remainingMs = TIMEOUT_MS - elapsedMs;
   const timerClass = [
@@ -747,8 +776,17 @@ function ActionStack({
       )}
       {state === 'complete' && finalResult && !retryMsg && isEmbedded() && (
         <div className="loading-panel">
-          <p className="loading-msg" style={{ color: 'var(--green, #22c55e)' }}>
-            {argusToken ? 'Verified!' : 'Processing...'}
+          <p
+            className="loading-msg"
+            style={{
+              color: argusToken
+                ? 'var(--green, #22c55e)'
+                : verdict && !argusToken
+                  ? 'var(--red, #ef4444)'
+                  : 'var(--text-muted, #9ca3af)',
+            }}
+          >
+            {argusToken ? 'Verified!' : verdict ? 'Try again' : 'Processing...'}
           </p>
         </div>
       )}

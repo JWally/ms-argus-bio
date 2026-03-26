@@ -46,7 +46,32 @@ interface ServerGlyph {
 
 const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 const SERVER_GLYPH_POOL: ServerGlyph[] = [
-  ...['A', 'C', 'E', 'F', 'H', 'J', 'K', 'M', 'N', 'P', 'R', 'T', 'W', 'X', 'Y'].map((ch) => ({
+  // Excluded: D (too similar to O), Q (too similar to O), V (too similar to U)
+  ...[
+    'A',
+    'B',
+    'C',
+    'E',
+    'F',
+    'G',
+    'H',
+    'I',
+    'J',
+    'K',
+    'L',
+    'M',
+    'N',
+    'O',
+    'P',
+    'R',
+    'S',
+    'T',
+    'U',
+    'W',
+    'X',
+    'Y',
+    'Z',
+  ].map((ch) => ({
     char: ch,
     type: 'letter' as const,
     modelIndex: LETTERS.indexOf(ch),
@@ -536,10 +561,29 @@ function validateChallengeAnswers(payload: BiometricPayload): {
 
   if (mismatches.length === 0) return { retry: null, scores };
 
+  // Diagnostic: log imageData statistics to debug blank-image failures
+  const imageStats = payload.digits.slice(0, checkLen).map((d, i) => {
+    if (!d?.imageData) return { i, len: 0, sum: 0, max: 0, nonZero: 0 };
+    const arr = d.imageData;
+    let sum = 0,
+      max = 0,
+      nonZero = 0;
+    for (let j = 0; j < arr.length; j++) {
+      const v = arr[j];
+      sum += v;
+      if (v > max) max = v;
+      if (v > 0) nonZero++;
+    }
+    return { i, len: arr.length, sum, max, nonZero };
+  });
+
   logger.info('Challenge answer mismatch — retry', {
     challengeId: payload.challengeId.slice(0, 30),
     mode: mode ?? 'captcha',
     mismatches,
+    imageStats,
+    digitCount: payload.digits.length,
+    expectedCount: expected.length,
   });
   return {
     retry: jsonResponse(200, {
@@ -597,8 +641,8 @@ function detectJa4UaMismatch(ja4: string, ua: string): string | null {
   const uaSaysFirefox = /Firefox/i.test(ua);
 
   // Safari (SecureTransport): 24+ ciphers. Chrome (BoringSSL): 15-17.
-  if (uaSaysSafari && nCiphers < 20) return `safari-ua-but-${nCiphers}-ciphers`;
-  if (uaSaysFirefox && nCiphers < 14) return `firefox-ua-but-${nCiphers}-ciphers`;
+  if (uaSaysSafari && nCiphers < 12) return `safari-ua-but-${nCiphers}-ciphers`;
+  if (uaSaysFirefox && nCiphers < 12) return `firefox-ua-but-${nCiphers}-ciphers`;
 
   return null;
 }

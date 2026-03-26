@@ -21,6 +21,7 @@
     "train": "tsx scripts/train.ts",
     "train:emnist": "tsx scripts/train-emnist.ts",
     "train:emnist-15": "tsx scripts/train-emnist-15.ts",
+    "train:emnist-23": "tsx scripts/train-emnist-23.ts",
     "build:site": "VITE_API_URL=https://api-bio-dev-jw.argus.pw npm run build",
     "deploy": "npm run build:site && npm run cdk:deploy",
     "cdk:deploy": "npx cdk deploy --require-approval never",

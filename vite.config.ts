@@ -34,6 +34,7 @@ function obfuscatorPlugin(): Plugin {
         selfDefending: false,
         transformObjectKeys: false,
         unicodeEscapeSequence: false,
+        reservedStrings: ['bytecode-modules'],
       });
       return { code: result.getObfuscatedCode(), map: null };
     },

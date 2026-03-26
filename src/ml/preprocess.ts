@@ -49,7 +49,7 @@ export function renderTo28x28(
   pad: number
 ): { outCanvas: HTMLCanvasElement; empty: boolean } {
   const { sx, sy, sw, sh } = region;
-  const ctx = source.getContext('2d')!;
+  const ctx = source.getContext('2d', { willReadFrequently: true })!;
   const imageData = ctx.getImageData(sx, sy, sw, sh);
   const { data, width, height } = imageData;
 
@@ -92,7 +92,7 @@ function make28x28(): HTMLCanvasElement {
     _out28.width = 28;
     _out28.height = 28;
   }
-  const ctx = _out28.getContext('2d')!;
+  const ctx = _out28.getContext('2d', { willReadFrequently: true })!;
   ctx.fillStyle = 'black';
   ctx.fillRect(0, 0, 28, 28);
   return _out28;
@@ -105,7 +105,9 @@ export function getImageData28x28(canvas: HTMLCanvasElement): number[] {
   const { outCanvas, empty } = renderTo28x28(canvas, region, 20);
   if (empty) return new Array(784).fill(0);
 
-  const outData = outCanvas.getContext('2d')!.getImageData(0, 0, 28, 28);
+  const outData = outCanvas
+    .getContext('2d', { willReadFrequently: true })!
+    .getImageData(0, 0, 28, 28);
   const result: number[] = [];
   for (let i = 0; i < 784; i++) {
     result.push(outData.data[i * 4]); // 0-255 raw — server normalizes internally
