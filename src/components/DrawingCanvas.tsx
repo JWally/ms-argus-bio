@@ -79,7 +79,9 @@ const DrawingCanvas = forwardRef<CanvasHandle, Props>(({ disabled }, ref) => {
         canvas.width = w;
         canvas.height = h;
       }
-      const ctx = canvas.getContext('2d')!;
+      // willReadFrequently keeps the canvas CPU-backed so getImageData()
+      // works correctly on Mac (Safari/Firefox GPU readback returns stale data).
+      const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
       ctx.fillStyle = '#000';
       ctx.fillRect(0, 0, w, h);
     };

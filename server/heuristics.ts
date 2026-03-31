@@ -109,8 +109,9 @@ function getBotReason(payload: BiometricPayload): string | null {
     return `zeroMovement:${((f.zeroMovementRatio ?? 0) * 100).toFixed(0)}%`;
   // avgPredictedCount: demoted to embedding-only signal (dim 87).
   // Too many false positives across Firefox, Safari, and Linux Chrome (Wayland/X11).
-  // avgTimestampDelta < 1ms: CDP events have near-zero delta
-  if ((f.avgTimestampDelta ?? 999) < 1 && f.totalPoints > 20)
+  // avgTimestampDelta < 0.5ms: CDP events have near-zero delta (~0ms).
+  // Threshold lowered from 1ms — Safari on macOS lands at 0.8-1ms legitimately.
+  if ((f.avgTimestampDelta ?? 999) < 0.5 && f.totalPoints > 20)
     return `timestampDelta:${(f.avgTimestampDelta ?? 0).toFixed(2)}ms`;
 
   // ── rAF cadence analysis ──
