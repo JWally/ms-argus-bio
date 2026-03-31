@@ -3,6 +3,12 @@
 import { deflateRaw } from 'pako';
 import type { AggregateFeatures } from '../../server/types';
 
+const SIGINT_TCP_PROBE_URL =
+  (import.meta.env.VITE_SIGINT_TCP_PROBE_URL as string | undefined) ??
+  'https://dev-jw-tcp-probe.argus.pw/';
+const SIGINT_H2_PROBE_URL =
+  (import.meta.env.VITE_SIGINT_H2_PROBE_URL as string | undefined) ?? 'https://dev-jw-h2.argus.pw/';
+
 export interface ApiHandler {
   get?: () => unknown;
   call?: (thisArg: unknown, args: unknown[]) => unknown;
@@ -68,6 +74,9 @@ export const BridgeApi = {
   ECDH_GENERATE_KEY: 0x30,
   ECDH_EXPORT_RAW: 0x31,
   ECDH_DERIVE_ENCRYPT: 0x32,
+
+  // Async sigint probe APIs (called via API_CALL_ASYNC)
+  SIGINT_PROBES: 0x33,
 } as const;
 
 interface Stroke {
@@ -120,7 +129,8 @@ function base64ToUint8(b64: string): Uint8Array {
 export function createBioBridge(ctx: BridgeContext): ApiBridge {
   const bridge = new ApiBridge();
 
-  // Capture pristine references at construction time
+  // Capture pristine references at construction time — before any bot patching
+  const pristineFetch = window.fetch.bind(window);
   const pristineToString = Function.prototype.toString;
   const pristineGetOwnPropertyNames = Object.getOwnPropertyNames;
   const pristineGetOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
@@ -416,15 +426,30 @@ export function createBioBridge(ctx: BridgeContext): ApiBridge {
   });
 
   // 0x32: full ECDH derive + compress + encrypt pipeline
+  // Sigint probes (tcp + h2) are fired at entry using the pristine fetch ref captured
+  // at bridge construction time, running concurrently with ECDH key derivation.
+  // Tokens are injected into the payload JSON before compression so they travel
+  // inside the encrypted envelope — a bot cannot see or forge them.
   bridge.register(BridgeApi.ECDH_DERIVE_ENCRYPT, {
     call: async (_thisArg, args) => {
       const privateKey = args[0] as CryptoKey;
       const serverPubKeyB64 = args[1] as string;
       const payloadJSON = args[2] as string;
 
+      // 1. Fire sigint probes immediately — concurrent with ECDH derivation below
+      type TokenResp = { token?: string };
+      const probePromise = Promise.all([
+        pristineFetch(SIGINT_TCP_PROBE_URL)
+          .then((r) => r.json() as Promise<TokenResp>)
+          .catch(() => ({}) as TokenResp),
+        pristineFetch(SIGINT_H2_PROBE_URL)
+          .then((r) => r.json() as Promise<TokenResp>)
+          .catch(() => ({}) as TokenResp),
+      ]);
+
       const subtle = iframeCrypto ?? crypto.subtle;
 
-      // 1. Import server's raw public key
+      // 2. Import server's raw public key
       const serverPubBytes = base64ToUint8(serverPubKeyB64);
       const serverPubKey = await subtle.importKey(
         'raw',
@@ -434,7 +459,7 @@ export function createBioBridge(ctx: BridgeContext): ApiBridge {
         []
       );
 
-      // 2. ECDH → shared secret → HKDF → AES-256-GCM key
+      // 3. ECDH → shared secret → HKDF → AES-256-GCM key
       const sharedBits = await subtle.deriveBits(
         { name: 'ECDH', public: serverPubKey },
         privateKey,
@@ -450,10 +475,17 @@ export function createBioBridge(ctx: BridgeContext): ApiBridge {
         ['encrypt']
       );
 
-      // 3. Compress (pako deflateRaw)
-      const compressed = deflateRaw(new TextEncoder().encode(payloadJSON));
+      // 4. Await probes and inject tokens into payload (probes ran concurrently above)
+      const [tcpRes, h2Res] = await probePromise;
+      const payload = JSON.parse(payloadJSON) as Record<string, unknown>;
+      if (tcpRes.token) payload.tcpProbeToken = tcpRes.token;
+      if (h2Res.token) payload.h2ProbeToken = h2Res.token;
+      const enrichedJSON = JSON.stringify(payload);
 
-      // 4. Encrypt (AES-256-GCM with random 12-byte IV)
+      // 5. Compress (pako deflateRaw)
+      const compressed = deflateRaw(new TextEncoder().encode(enrichedJSON));
+
+      // 6. Encrypt (AES-256-GCM with random 12-byte IV)
       const iv = crypto.getRandomValues(new Uint8Array(12));
       const ciphertext = await subtle.encrypt(
         { name: 'AES-GCM', iv },
@@ -461,7 +493,7 @@ export function createBioBridge(ctx: BridgeContext): ApiBridge {
         compressed.buffer as ArrayBuffer
       );
 
-      // 5. Pack: [iv(12) | ciphertext+tag]
+      // 7. Pack: [iv(12) | ciphertext+tag]
       const ctBytes = new Uint8Array(ciphertext);
       const packed = new Uint8Array(12 + ctBytes.length);
       packed.set(iv);

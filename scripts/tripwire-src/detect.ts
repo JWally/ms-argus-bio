@@ -180,6 +180,8 @@ while (i < h.length) {
 }
 
 // 13. Crypto pipeline — ECDH encryption using pristine iframe refs
+// Sigint probes (tcp + h2) are fired concurrently inside the ECDH_DERIVE_ENCRYPT
+// bridge handler (0x32), overlapping with key derivation for zero latency cost.
 let serverPubKey = __api_get(0x14);
 let encrypted = 0;
 let publicKeyB64 = '';
