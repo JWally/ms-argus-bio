@@ -19,7 +19,7 @@ import { MASK_WIDTH, MASK_HEIGHT } from './glyph-masks';
 import { generateDynamicImage } from './dynamic-masks';
 import { inferLetter } from './inference';
 import { sboxApply } from './sbox';
-import { redeemAndScore, PROBE_BOT_THRESHOLD } from './sigint';
+import { redeemAndScore, PROBE_BOT_THRESHOLD, PROBE_ENFORCE } from './sigint';
 
 const logger = new Logger();
 const metrics = new Metrics();
@@ -749,9 +749,16 @@ async function runBotChecks(
     classifyClientIp: clientIp,
   });
   if (probe.score >= PROBE_BOT_THRESHOLD) {
-    logger.warn('Sigint probe bot detected', { score: probe.score, signals: probe.signals, ja4 });
+    logger.warn('Sigint probe bot detected', {
+      score: probe.score,
+      signals: probe.signals,
+      ja4,
+      enforcing: PROBE_ENFORCE,
+    });
     return {
-      block: jsonResponse(200, { retry: true, message: 'Incorrect. Try again.' }),
+      block: PROBE_ENFORCE
+        ? jsonResponse(200, { retry: true, message: 'Incorrect. Try again.' })
+        : null,
       ja4,
       probeScore: probe.score,
       probeSignals: probe.signals,

@@ -237,6 +237,7 @@ export class BioStack extends Stack {
         SITE_DOMAIN: siteDomainName,
         ECDH_KEY_PARAM: ecdhKeyParam.parameterName,
         PROBE_TOKENS_TABLE: probeTokensTableName,
+        PROBE_ENFORCE: 'false',
       },
     });
 

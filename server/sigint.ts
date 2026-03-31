@@ -173,6 +173,12 @@ function parseUaFlags(userAgent: string): { claimsChrome: boolean; claimsFirefox
 export const PROBE_BOT_THRESHOLD = 50;
 
 /**
+ * When true, scores are computed and logged but never block requests.
+ * Set PROBE_ENFORCE=true to enable blocking. Defaults to log-only during rollout.
+ */
+export const PROBE_ENFORCE = process.env.PROBE_ENFORCE === 'true';
+
+/**
  * Redeem tcpProbeToken + h2ProbeToken from DynamoDB and compute a bot score.
  * Score >= PROBE_BOT_THRESHOLD → treat as bot.
  * Missing tokens are themselves a risk signal.
