@@ -19,6 +19,7 @@ import { MASK_WIDTH, MASK_HEIGHT } from './glyph-masks';
 import { generateDynamicImage } from './dynamic-masks';
 import { inferLetter } from './inference';
 import { sboxApply } from './sbox';
+import { redeemAndScore, PROBE_BOT_THRESHOLD } from './sigint';
 
 const logger = new Logger();
 const metrics = new Metrics();
@@ -722,6 +723,43 @@ function checkJa4Mismatch(ja4: string | undefined, ua: string): APIGatewayProxyR
   return jsonResponse(200, { retry: true, message: 'Incorrect. Try again.' });
 }
 
+interface BotCheckResult {
+  block: APIGatewayProxyResultV2 | null;
+  ja4: string | undefined;
+  probeScore: number;
+  probeSignals: string[];
+}
+
+/** Run all bot signal checks (JA4 + sigint probes). Returns block response or null. */
+async function runBotChecks(
+  payload: BiometricPayload,
+  event: APIGatewayProxyEventV2
+): Promise<BotCheckResult> {
+  const ja4 = event.headers?.['cloudfront-viewer-ja4-fingerprint'];
+  const ja4Block = checkJa4Mismatch(ja4, event.headers?.['user-agent'] ?? '');
+  if (ja4Block) return { block: ja4Block, ja4, probeScore: 0, probeSignals: [] };
+
+  const clientIp =
+    (event.headers?.['cloudfront-viewer-address'] ?? '').split(':')[0] ||
+    (event.headers?.['x-forwarded-for'] ?? '').split(',')[0].trim();
+  const probe = await redeemAndScore({
+    tcpToken: payload.tcpProbeToken,
+    h2Token: payload.h2ProbeToken,
+    userAgent: event.headers?.['user-agent'] ?? payload.userAgent,
+    classifyClientIp: clientIp,
+  });
+  if (probe.score >= PROBE_BOT_THRESHOLD) {
+    logger.warn('Sigint probe bot detected', { score: probe.score, signals: probe.signals, ja4 });
+    return {
+      block: jsonResponse(200, { retry: true, message: 'Incorrect. Try again.' }),
+      ja4,
+      probeScore: probe.score,
+      probeSignals: probe.signals,
+    };
+  }
+  return { block: null, ja4, probeScore: probe.score, probeSignals: probe.signals };
+}
+
 async function handleClassify(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
   const start = Date.now();
 
@@ -733,10 +771,11 @@ async function handleClassify(event: APIGatewayProxyEventV2): Promise<APIGateway
       return jsonResponse(400, { error: 'Invalid payload structure' });
     }
 
-    // JA4 TLS fingerprint cross-check (tamper-proof — computed by CloudFront)
-    const ja4 = event.headers?.['cloudfront-viewer-ja4-fingerprint'];
-    const ja4Block = checkJa4Mismatch(ja4, event.headers?.['user-agent'] ?? '');
-    if (ja4Block) return ja4Block;
+    // Bot signal checks: JA4/UA mismatch + sigint probe token scoring.
+    // Probe tokens were collected during ECDH encryption on the client,
+    // so DynamoDB redemption here adds no perceptible latency.
+    const botCheck = await runBotChecks(payload, event);
+    if (botCheck.block) return botCheck.block;
 
     // Server-side answer validation — returns retry response on mismatch
     const { retry: retryResponse, scores } = validateChallengeAnswers(payload);
@@ -798,7 +837,9 @@ async function handleClassify(event: APIGatewayProxyEventV2): Promise<APIGateway
       speedVariance: Math.round(payload.features.speedVariance * 10000) / 10000,
       timingCV: Math.round(timingCV(payload) * 1000) / 1000,
       vmHash: payload.vmHash ?? 'missing',
-      ja4: ja4 ?? 'missing',
+      ja4: botCheck.ja4 ?? 'missing',
+      probeScore: botCheck.probeScore,
+      probeSignals: botCheck.probeSignals,
     });
 
     // Mask bot verdict — return same retry response as wrong answers

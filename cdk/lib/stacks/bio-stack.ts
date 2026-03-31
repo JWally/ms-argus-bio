@@ -66,6 +66,18 @@ export class BioStack extends Stack {
       `${vectorSsmPrefix}/qdrant-secret-arn`
     );
 
+    // Sigint probe tokens table from ms-argus-platform
+    // Written by ms-argus-sigint; redeemed here to score JA4/H2/TCP fingerprints.
+    const sigintSsmPrefix = `/argus-platform/${environment}`;
+    const probeTokensTableName = ssm.StringParameter.valueForStringParameter(
+      this,
+      `${sigintSsmPrefix}/probe-tokens-table-name`
+    );
+    const probeTokensTableArn = ssm.StringParameter.valueForStringParameter(
+      this,
+      `${sigintSsmPrefix}/probe-tokens-table-arn`
+    );
+
     // =========================================================================
     // DNS & CERTIFICATES
     // =========================================================================
@@ -224,6 +236,7 @@ export class BioStack extends Stack {
         TOKENS_TABLE: tokensTable.tableName,
         SITE_DOMAIN: siteDomainName,
         ECDH_KEY_PARAM: ecdhKeyParam.parameterName,
+        PROBE_TOKENS_TABLE: probeTokensTableName,
       },
     });
 
@@ -243,6 +256,15 @@ export class BioStack extends Stack {
     merchantsTable.grantReadWriteData(classifyFn);
     sessionsTable.grantReadWriteData(classifyFn);
     tokensTable.grantReadWriteData(classifyFn);
+
+    // Grant read-only access to sigint probe tokens table (GetItem only — never write)
+    classifyFn.addToRolePolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ['dynamodb:GetItem'],
+        resources: [probeTokensTableArn],
+      })
+    );
 
     // =========================================================================
     // HTTP API GATEWAY

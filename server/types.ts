@@ -19,6 +19,9 @@ export interface BiometricPayload {
   tamperedApis?: string[];
   /** VM integrity hash — XOR-fold of features + deploy secret */
   vmHash?: string;
+  /** Sigint probe tokens — redeemed server-side for JA4/H2/TCP fingerprints */
+  tcpProbeToken?: string;
+  h2ProbeToken?: string;
 }
 
 export interface DigitResult {
