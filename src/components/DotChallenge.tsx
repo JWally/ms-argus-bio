@@ -1,7 +1,14 @@
 import { useRef, useEffect, useMemo } from 'react';
+import {
+  workerAnimate,
+  workerStopAnimate,
+  workerRestartAnimate,
+} from '../utils/crypto-worker-client';
 
 interface DotChallengeProps {
-  /** Base64-encoded 8-bit grayscale images from the server (one per glyph) */
+  /** Base64-encoded 8-bit grayscale images from the server (one per glyph).
+   *  Empty strings mean pixel data is held inside the crypto worker — rendering
+   *  happens via OffscreenCanvas and pixel arrays never appear in main-thread messages. */
   images: string[];
   imageWidth: number;
   imageHeight: number;
@@ -132,6 +139,11 @@ function computeDots({ pixels, iw, ih, activeSlot, w, h, slotW }: ComputeDotsOpt
   return dots;
 }
 
+// Track canvas elements that have had transferControlToOffscreen() called.
+// React StrictMode mounts → cleanups → remounts using the same DOM node;
+// transferControlToOffscreen() may only be called once per element.
+const transferredCanvases = new WeakSet<HTMLCanvasElement>();
+
 export default function DotChallenge({
   images,
   imageWidth,
@@ -142,13 +154,46 @@ export default function DotChallenge({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef(0);
 
-  const currentImage = useMemo(
-    () => (images[currentIndex] ? unpackImage(images[currentIndex]) : null),
-    [images, currentIndex]
-  );
-  const activeSlot = 0;
+  // Worker mode: all images are empty placeholders — pixel data lives in the crypto worker.
+  const workerMode = images.length > 0 && images[0] === '';
 
+  const currentImage = useMemo(
+    () => (!workerMode && images[currentIndex] ? unpackImage(images[currentIndex]) : null),
+    [images, currentIndex, workerMode]
+  );
+
+  // ── Worker path: OffscreenCanvas rendering ───────────────────────────────────
+  // Pixel arrays never leave the worker, so bot hooks on postMessage see nothing.
   useEffect(() => {
+    if (!workerMode) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const containerWidth = canvas.parentElement?.clientWidth ?? 280;
+
+    if (!transferredCanvases.has(canvas)) {
+      // First mount: size the canvas then hand control to the worker permanently.
+      canvas.width = containerWidth;
+      canvas.height = H;
+      canvas.style.width = `${containerWidth}px`;
+      canvas.style.height = `${H}px`;
+      transferredCanvases.add(canvas);
+      const offscreen = canvas.transferControlToOffscreen();
+      workerAnimate(currentIndex, offscreen, containerWidth, frameStep).catch(() => {});
+    } else {
+      // StrictMode remount or index/frameStep change: canvas already in worker, just restart.
+      workerRestartAnimate(currentIndex, frameStep).catch(() => {});
+    }
+
+    return () => {
+      workerStopAnimate().catch(() => {});
+    };
+  }, [workerMode, currentIndex, frameStep]);
+
+  // ── Fallback path: main-thread rAF rendering ─────────────────────────────────
+  // Used when the crypto worker is unavailable (e.g., dev without HTTPS) or
+  // when images contain real base64 data (generateFallbackChallenge path).
+  useEffect(() => {
+    if (workerMode) return;
     const canvas = canvasRef.current;
     if (!canvas || !currentImage) return;
 
@@ -170,7 +215,7 @@ export default function DotChallenge({
       pixels: currentImage,
       iw: imageWidth,
       ih: imageHeight,
-      activeSlot,
+      activeSlot: 0,
       w,
       h,
       slotW,
@@ -218,7 +263,7 @@ export default function DotChallenge({
 
     rafRef.current = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(rafRef.current);
-  }, [currentImage, imageWidth, imageHeight, activeSlot, frameStep]);
+  }, [currentImage, imageWidth, imageHeight, frameStep, workerMode]);
 
   return <canvas ref={canvasRef} className="dot-challenge-canvas" aria-hidden="true" />;
 }

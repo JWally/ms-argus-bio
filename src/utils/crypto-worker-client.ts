@@ -12,15 +12,20 @@ const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Err
 let fallbackKeys: CryptoKeys | null = null;
 let usingWorker = false;
 
-function postAndWait<T>(msg: Record<string, unknown>): Promise<T> {
+function postAndWait<T>(msg: Record<string, unknown>, transfer?: Transferable[]): Promise<T> {
   return new Promise((resolve, reject) => {
     const id = ++msgId;
     pending.set(id, {
       resolve: resolve as (v: unknown) => void,
       reject,
     });
+    const msgWithId = { ...msg, id };
     // Route through MessageChannel port if available, else direct Worker
-    (port ?? worker!).postMessage({ ...msg, id });
+    if (transfer?.length) {
+      (port ?? worker!).postMessage(msgWithId, transfer);
+    } else {
+      (port ?? worker!).postMessage(msgWithId);
+    }
   });
 }
 
@@ -119,4 +124,45 @@ export async function workerEncrypt(payload: object, serverPubKeyB64: string): P
 export function getRawPublicKey(): string | null {
   // The caller should have stored this from initCrypto result
   return null;
+}
+
+// ── Worker animation API (OffscreenCanvas path) ──────────────────────────────
+
+/**
+ * Transfer canvas control to the crypto worker and start the dot animation.
+ * The OffscreenCanvas is Transferred — the main thread loses access after this call.
+ * Only call this once per canvas element.
+ */
+export async function workerAnimate(
+  index: number,
+  canvas: OffscreenCanvas,
+  canvasWidth: number,
+  frameStep: number
+): Promise<void> {
+  if (!usingWorker || !worker) return;
+  await postAndWait({ type: 'animate', index, canvas, canvasWidth, frameStep }, [canvas]);
+}
+
+/**
+ * Switch to a different glyph index. The worker rebuilds dot layout and restarts the loop.
+ * Canvas must already be in the worker (call workerAnimate first).
+ */
+export async function workerSwitchGlyph(index: number): Promise<void> {
+  if (!usingWorker || !worker) return;
+  await postAndWait({ type: 'switch-glyph', index });
+}
+
+/** Stop the animation loop in the worker. */
+export async function workerStopAnimate(): Promise<void> {
+  if (!usingWorker || !worker) return;
+  await postAndWait({ type: 'stop-animate' });
+}
+
+/**
+ * Restart animation without re-transferring the canvas.
+ * Used after React StrictMode cleanup+remount when the canvas DOM node is reused.
+ */
+export async function workerRestartAnimate(index: number, frameStep: number): Promise<void> {
+  if (!usingWorker || !worker) return;
+  await postAndWait({ type: 'restart-animate', index, frameStep });
 }
