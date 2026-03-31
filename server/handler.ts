@@ -809,7 +809,14 @@ async function handleClassify(event: APIGatewayProxyEventV2): Promise<APIGateway
     // Classify via kNN + heuristic fallback
     const result = classify(neighbors, hResult.label);
 
-    const trained = await maybeUpsertTraining({ client, embedding, result, hResult, payload, ja4 });
+    const trained = await maybeUpsertTraining({
+      client,
+      embedding,
+      result,
+      hResult,
+      payload,
+      ja4: botCheck.ja4,
+    });
 
     const verdict: Verdict = {
       verdict: result.verdict,
