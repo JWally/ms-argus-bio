@@ -9,9 +9,7 @@ import { extractServerKey } from '../utils/crypto';
 import { initCrypto, workerDecrypt } from '../utils/crypto-worker-client';
 import { measureAsync } from '../utils/perf';
 import { isEmbedded } from '../utils/embed';
-
-const API_URL = import.meta.env.VITE_API_URL as string | undefined;
-const MSG_ERROR = 'argus-bio-error';
+import { API_URL, MSG_ERROR } from '../constants';
 
 // Eagerly start ECDH key generation so it's ready before first fetchChallenge
 const cryptoReady = API_URL ? initCrypto() : null;
@@ -78,8 +76,8 @@ export interface UseChallengeResult {
   rawPublicKeyRef: React.MutableRefObject<string>;
   serverPubKeyRef: React.MutableRefObject<string>;
   sessionIdRef: React.MutableRefObject<string | null>;
-  /** Fetch a new challenge and update internal state. Returns the new glyphs. */
-  reload: () => Promise<Glyph[]>;
+  /** Fetch a new challenge and update internal state. */
+  reload: () => Promise<void>;
 }
 
 export function useChallenge(onReady?: () => void): UseChallengeResult {
@@ -187,11 +185,10 @@ export function useChallenge(onReady?: () => void): UseChallengeResult {
     })();
   }, [fetchChallenge]);
 
-  const reload = useCallback(async (): Promise<Glyph[]> => {
+  const reload = useCallback(async (): Promise<void> => {
     const c = await fetchChallenge();
     setChallenge(c);
     challengeRef.current = c;
-    return c;
   }, [fetchChallenge]);
 
   return {

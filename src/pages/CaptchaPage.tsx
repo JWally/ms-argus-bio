@@ -22,14 +22,14 @@ import {
 } from '../utils/progression';
 import { useChallenge } from '../hooks/useChallenge';
 import { useVerdictFlow } from '../hooks/useVerdictFlow';
+import { MSG_ERROR, MSG_VERIFIED } from '../constants';
 import '../App.css';
 
 type AppState = 'loading' | 'idle' | 'active' | 'complete';
 
 const TIMEOUT_MS = 30_000;
 const MEASURE_BIOMETRICS = 'compute:biometrics';
-const MSG_VERIFIED = 'argus-bio-verified';
-const MSG_ERROR = 'argus-bio-error';
+const LOADING_MSG = 'Initializing...';
 
 // Start long-task observer for profiling
 observeLongTasks();
@@ -56,11 +56,9 @@ function formatTime(ms: number): string {
 
 export default function CaptchaPage() {
   const [state, setState] = useState<AppState>('loading');
-  const [loadingMsg] = useState('Initializing...');
   const [currentIndex, setCurrentIndex] = useState(0);
   const [elapsedMs, setElapsedMs] = useState(0);
   const [flashKey, setFlashKey] = useState(0);
-  const [flashColor, setFlashColor] = useState<'green' | 'red'>('green');
   const [finalResult, setFinalResult] = useState<FinalResult | null>(null);
 
   // Progression state
@@ -264,7 +262,6 @@ export default function CaptchaPage() {
       advance(now);
     } else {
       // Empty canvas — retry with red flash
-      setFlashColor('red');
       setFlashKey((k) => k + 1);
       canvasRef.current?.clear();
     }
@@ -351,7 +348,7 @@ export default function CaptchaPage() {
 
   return (
     <div className={`app ${state === 'complete' ? 'app-complete' : ''}`}>
-      {flashKey > 0 && <div key={flashKey} className={`flash-overlay flash-${flashColor}`} />}
+      {flashKey > 0 && <div key={flashKey} className="flash-overlay flash-red" />}
       <header>
         <h1>
           ARGUS <span className="accent">BIO</span>
@@ -370,7 +367,7 @@ export default function CaptchaPage() {
       {!sessionError && state === 'loading' && (
         <div className="loading-panel">
           <div className="spinner" />
-          <p className="loading-msg">{loadingMsg}</p>
+          <p className="loading-msg">{LOADING_MSG}</p>
         </div>
       )}
 

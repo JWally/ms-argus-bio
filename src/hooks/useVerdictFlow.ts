@@ -12,10 +12,9 @@ import { runTripwire, type TripwireResult } from '../vm/tripwire';
 import { measureAsync, measureSync } from '../utils/perf';
 import { workerEncrypt } from '../utils/crypto-worker-client';
 import { isEmbedded } from '../utils/embed';
+import { API_URL, MSG_ERROR } from '../constants';
 import type { Glyph } from './useChallenge';
 
-const API_URL = import.meta.env.VITE_API_URL as string | undefined;
-const MSG_ERROR = 'argus-bio-error';
 const MEASURE_BIOMETRICS = 'compute:biometrics';
 
 export interface UseVerdictFlowParams {
@@ -114,11 +113,11 @@ export function useVerdictFlow({
         return;
       }
 
-      const ctrl = new AbortController();
-      const timeout = setTimeout(() => ctrl.abort(), 10_000);
-
-      // Wait for tripwire to complete before sending
+      // AbortController is created inside the .then() so the 10s window covers
+      // only the fetch itself, not the tripwire execution time.
       tripwirePromise.then((tw) => {
+        const ctrl = new AbortController();
+        const timeout = setTimeout(() => ctrl.abort(), 10_000);
         performance.mark('fetch:classify:start');
         let sendRequest: Promise<Response>;
 
