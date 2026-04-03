@@ -2,7 +2,6 @@
 // Lambda handler for biometric classification API
 
 import { randomBytes, createCipheriv, createDecipheriv, createHmac } from 'crypto';
-import { inflateRawSync } from 'zlib';
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
 import { Logger } from '@aws-lambda-powertools/logger';
 import { Metrics, MetricUnit } from '@aws-lambda-powertools/metrics';
@@ -18,7 +17,7 @@ import type { BiometricPayload, Verdict, ClassifyResponse, Merchant } from './ty
 import { MASK_WIDTH, MASK_HEIGHT } from './glyph-masks';
 import { generateDynamicImage } from './dynamic-masks';
 import { inferLetter } from './inference';
-import { sboxApply } from './sbox';
+import { encryptForClient, decryptPayload, type EcdhKeys } from './ecdh';
 import { redeemAndScore, PROBE_BOT_THRESHOLD, PROBE_ENFORCE } from './sigint';
 
 const logger = new Logger();
@@ -167,18 +166,6 @@ function decryptChallenge(challengeId: string, now: number): DecryptedChallenge 
 // Server ECDH keys loaded from SSM Parameter Store with 30-min cache.
 // Used for key exchange in /v1/challenge and payload decryption in /v1/classify.
 
-interface EcdhKeyData {
-  privateKey: string;
-  publicKey: string;
-  rawPublicKey: string;
-  createdAt: number;
-}
-
-interface EcdhKeys {
-  current: EcdhKeyData;
-  previous?: EcdhKeyData;
-}
-
 const ssmClient = new SSMClient({});
 let cachedEcdhKeys: EcdhKeys | null = null;
 let ecdhKeysLoadedAt = 0;
@@ -205,111 +192,6 @@ async function loadEcdhKeyPair(): Promise<EcdhKeys | null> {
     logger.warn('Failed to load ECDH keys from SSM', { error: err });
     return cachedEcdhKeys; // return stale cache if available
   }
-}
-
-const HKDF_INFO = new TextEncoder().encode('argus-bio-v1');
-
-/** Derive an AES-256-GCM key from ECDH shared secret + HKDF with a date salt */
-async function deriveAesKeyServer(
-  serverPrivKeyPkcs8: string,
-  clientPubKeyRaw: string,
-  dateSalt: string,
-  usages: ('encrypt' | 'decrypt')[] = ['decrypt']
-) {
-  // Import server private key (PKCS8 base64)
-  const privBytes = Buffer.from(serverPrivKeyPkcs8, 'base64');
-  const serverPrivKey = await crypto.subtle.importKey(
-    'pkcs8',
-    privBytes,
-    { name: 'ECDH', namedCurve: 'P-256' },
-    false,
-    ['deriveBits']
-  );
-
-  // Import client raw public key (65 bytes with 04 prefix)
-  const pubBytes = Buffer.from(clientPubKeyRaw, 'base64');
-  const clientPubKey = await crypto.subtle.importKey(
-    'raw',
-    pubBytes,
-    { name: 'ECDH', namedCurve: 'P-256' },
-    false,
-    []
-  );
-
-  // ECDH → 256-bit shared secret
-  const sharedBits = await crypto.subtle.deriveBits(
-    { name: 'ECDH', public: clientPubKey },
-    serverPrivKey,
-    256
-  );
-
-  // HKDF → AES-256-GCM key
-  const hkdfKey = await crypto.subtle.importKey('raw', sharedBits, 'HKDF', false, ['deriveKey']);
-  const salt = new TextEncoder().encode(dateSalt);
-  return crypto.subtle.deriveKey(
-    { name: 'HKDF', hash: 'SHA-256', salt, info: HKDF_INFO },
-    hkdfKey,
-    { name: 'AES-GCM', length: 256 },
-    false,
-    usages
-  );
-}
-
-/** Encrypt an object as AES-256-GCM using the ECDH shared secret.
- *  Returns base64 string of [iv(12) | ciphertext+tag]. */
-async function encryptForClient(
-  data: object,
-  serverPrivKey: string,
-  clientPubKey: string
-): Promise<string> {
-  const today = new Date().toISOString().slice(0, 10);
-  const aesKey = await deriveAesKeyServer(serverPrivKey, clientPubKey, today, ['encrypt']);
-
-  const plaintext = sboxApply(new TextEncoder().encode(JSON.stringify(data)));
-  const iv = randomBytes(12);
-  const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, aesKey, plaintext);
-
-  const ct = Buffer.from(ciphertext);
-  return Buffer.concat([iv, ct]).toString('base64');
-}
-
-/** Decrypt an encrypted biometric payload (octet-stream body).
- *  Tries current key first, falls back to previous for in-flight rotation.
- *  For each key, tries today's date salt first, then yesterday's (midnight edge case). */
-async function decryptPayload(
-  body: string,
-  isBase64Encoded: boolean,
-  clientPubKey: string,
-  ecdhKeys: EcdhKeys
-): Promise<BiometricPayload | null> {
-  // Decode binary body → split iv (12 bytes) + ciphertext+tag
-  const packed = isBase64Encoded ? Buffer.from(body, 'base64') : Buffer.from(body, 'utf-8');
-  const iv = packed.subarray(0, 12);
-  const ciphertextWithTag = packed.subarray(12);
-
-  const keySets = [ecdhKeys.current, ecdhKeys.previous].filter((k): k is EcdhKeyData => k != null);
-  const today = new Date().toISOString().slice(0, 10);
-  const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
-  const dates = [today, yesterday];
-
-  for (const keySet of keySets) {
-    for (const dateSalt of dates) {
-      try {
-        const aesKey = await deriveAesKeyServer(keySet.privateKey, clientPubKey, dateSalt);
-        const decrypted = await crypto.subtle.decrypt(
-          { name: 'AES-GCM', iv },
-          aesKey,
-          ciphertextWithTag
-        );
-        const inflated = inflateRawSync(Buffer.from(decrypted));
-        return JSON.parse(inflated.toString('utf-8')) as BiometricPayload;
-      } catch {
-        continue; // try next key/date combo
-      }
-    }
-  }
-
-  return null;
 }
 
 // Module-scope singletons (reused across warm invocations)
@@ -375,6 +257,7 @@ function validatePayload(data: unknown): data is BiometricPayload {
     Array.isArray(p.challenge) &&
     typeof p.timestamp === 'number' &&
     typeof p.completionTimeMs === 'number' &&
+    p.completionTimeMs > 0 &&
     typeof p.passed === 'boolean' &&
     Array.isArray(p.digits) &&
     Array.isArray(p.confidenceTimeline) &&

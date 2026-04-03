@@ -95,13 +95,11 @@ export function useVerdictFlow({
           payload as Record<string, unknown>,
           serverPubKeyRef.current || undefined
         )
-      ).catch(
-        (): TripwireResult => ({
-          tampered: false,
-          vmSignals: [],
-          vmIntegrityHash: '',
-        })
-      );
+      ).catch((err: unknown): TripwireResult => {
+        // eslint-disable-next-line no-console
+        console.warn('[ARGUS BIO] Tripwire VM error — submitting without VM signals', err);
+        return { tampered: false, vmSignals: [], vmIntegrityHash: '' };
+      });
 
       // eslint-disable-next-line no-console
       void tripwirePromise.then(() => console.log('[ARGUS BIO] Biometric Payload', payload));

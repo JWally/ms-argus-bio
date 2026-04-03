@@ -169,8 +169,8 @@ describe('heuristicLabel', () => {
       expect(heuristicLabel(makePayload({ completionTimeMs: 800 })).label).toBe('uncertain');
     });
 
-    it('requires completionTimeMs < 45000', () => {
-      expect(heuristicLabel(makePayload({ completionTimeMs: 50000 })).label).toBe('uncertain');
+    it('requires completionTimeMs < 30000 (slow = bot)', () => {
+      expect(heuristicLabel(makePayload({ completionTimeMs: 50000 })).label).toBe('bot');
     });
 
     it('requires strokeCount >= 3', () => {

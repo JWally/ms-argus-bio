@@ -244,7 +244,6 @@ interface WorkerMessage {
     | 'decrypt'
     | 'encrypt'
     | 'animate'
-    | 'switch-glyph'
     | 'stop-animate'
     | 'restart-animate';
   encryptedB64?: string;
@@ -355,13 +354,6 @@ async function handleWorkerMessage(data: WorkerMessage): Promise<void> {
         const idx = data.index ?? 0;
         animFrameStep = data.frameStep ?? animFrameStep;
         switchToGlyph(idx);
-        respond({ id, ok: true });
-        break;
-      }
-
-      case 'switch-glyph': {
-        if (data.index === undefined) throw new Error('Missing index');
-        switchToGlyph(data.index);
         respond({ id, ok: true });
         break;
       }

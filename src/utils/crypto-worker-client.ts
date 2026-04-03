@@ -63,7 +63,13 @@ export async function initCrypto(): Promise<{ rawPublicKey: string; usingWorker:
     port.onmessage = handleMessage;
     worker.postMessage({ type: 'init-port', port: channel.port2 }, [channel.port2]);
 
-    const result = await postAndWait<{ rawPublicKey: string }>({ type: 'init' });
+    const initTimeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Worker init timeout')), 5000)
+    );
+    const result = await Promise.race([
+      postAndWait<{ rawPublicKey: string }>({ type: 'init' }),
+      initTimeout,
+    ]);
     usingWorker = true;
     return { rawPublicKey: result.rawPublicKey, usingWorker: true };
   } catch {
@@ -120,12 +126,6 @@ export async function workerEncrypt(payload: object, serverPubKeyB64: string): P
   return encryptPayload(payload, fallbackKeys.privateKey, serverPubKeyB64);
 }
 
-/** Get the raw public key for the current session (Worker or fallback). */
-export function getRawPublicKey(): string | null {
-  // The caller should have stored this from initCrypto result
-  return null;
-}
-
 // ── Worker animation API (OffscreenCanvas path) ──────────────────────────────
 
 /**
@@ -141,15 +141,6 @@ export async function workerAnimate(
 ): Promise<void> {
   if (!usingWorker || !worker) return;
   await postAndWait({ type: 'animate', index, canvas, canvasWidth, frameStep }, [canvas]);
-}
-
-/**
- * Switch to a different glyph index. The worker rebuilds dot layout and restarts the loop.
- * Canvas must already be in the worker (call workerAnimate first).
- */
-export async function workerSwitchGlyph(index: number): Promise<void> {
-  if (!usingWorker || !worker) return;
-  await postAndWait({ type: 'switch-glyph', index });
 }
 
 /** Stop the animation loop in the worker. */
