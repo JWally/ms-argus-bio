@@ -176,36 +176,26 @@ function applyNoise(pixels: Float32Array, noiseRate: number): void {
   }
 }
 
+/** Pick a random font variant for a glyph and apply affine + elastic transforms. */
+function transformGlyph(char: string): Float32Array {
+  const variants = GLYPH_VARIANTS[char];
+  if (!variants || variants.length === 0) throw new Error(`No mask variants for glyph: ${char}`);
+  let pixels = unpack(variants[Math.floor(Math.random() * variants.length)]);
+  const angle = (Math.random() - 0.5) * 24 * (Math.PI / 180); // ±12°
+  const scale = 1.0 + Math.random() * 0.24; // 1.00–1.24
+  const dx = (Math.random() - 0.5) * 4; // ±2px
+  const dy = (Math.random() - 0.5) * 4;
+  pixels = affineTransform({ src: pixels, angle, scale, dx, dy });
+  const elasticStrength = 2.0 + Math.random() * 1.5;
+  return elasticDeform(pixels, elasticStrength);
+}
+
 /** Generate a dynamically transformed mask for a glyph character.
  *  Picks a random font variant and applies rotation, scale, jitter,
  *  elastic deformation, and bit-flip noise. */
 export function generateDynamicMask(char: string): string {
-  const variants = GLYPH_VARIANTS[char];
-  if (!variants || variants.length === 0) {
-    throw new Error(`No mask variants for glyph: ${char}`);
-  }
-
-  // Pick random font variant
-  const variant = variants[Math.floor(Math.random() * variants.length)];
-  let pixels = unpack(variant);
-
-  // Random rotation ±12°
-  const angle = (Math.random() - 0.5) * 24 * (Math.PI / 180);
-  // Random scale 1.00–1.24
-  const scale = 1.0 + Math.random() * 0.24;
-  // Random position jitter ±2px
-  const dx = (Math.random() - 0.5) * 4;
-  const dy = (Math.random() - 0.5) * 4;
-
-  pixels = affineTransform({ src: pixels, angle, scale, dx, dy });
-
-  // Elastic deformation (strength 2.0–3.5px displacement)
-  const elasticStrength = 2.0 + Math.random() * 1.5;
-  pixels = elasticDeform(pixels, elasticStrength);
-
-  // Bit-flip noise (3%)
+  const pixels = transformGlyph(char);
   applyNoise(pixels, 0.03);
-
   return pack(pixels);
 }
 
@@ -214,28 +204,7 @@ export function generateDynamicMask(char: string): string {
  *  (1 byte per pixel) with anti-aliased edges, background noise, and intensity
  *  variation. Forces attackers to do real OCR instead of binary template matching. */
 export function generateDynamicImage(char: string): string {
-  const variants = GLYPH_VARIANTS[char];
-  if (!variants || variants.length === 0) {
-    throw new Error(`No image variants for glyph: ${char}`);
-  }
-
-  // Pick random font variant
-  const variant = variants[Math.floor(Math.random() * variants.length)];
-  let pixels = unpack(variant);
-
-  // Random rotation ±12°
-  const angle = (Math.random() - 0.5) * 24 * (Math.PI / 180);
-  // Random scale 1.00–1.24
-  const scale = 1.0 + Math.random() * 0.24;
-  // Random position jitter ±2px
-  const dx = (Math.random() - 0.5) * 4;
-  const dy = (Math.random() - 0.5) * 4;
-
-  pixels = affineTransform({ src: pixels, angle, scale, dx, dy });
-
-  // Elastic deformation (strength 2.0–3.5px displacement)
-  const elasticStrength = 2.0 + Math.random() * 1.5;
-  pixels = elasticDeform(pixels, elasticStrength);
+  const pixels = transformGlyph(char);
 
   // 1-pass box blur (radius 1) for anti-aliased edges
   boxBlur(pixels, W, H, 1);

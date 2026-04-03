@@ -67,36 +67,22 @@ function preloadLazyChunksPlugin(): Plugin {
     enforce: 'post',
     transformIndexHtml(html, ctx) {
       if (!ctx.bundle) return html;
-      const tags: { tag: string; attrs: Record<string, string>; injectTo: 'head' }[] = [];
+      type PreloadTag = { tag: string; attrs: Record<string, string>; injectTo: 'head' };
+      const preloadLink = (rel: string, href: string, as?: string): PreloadTag => ({
+        tag: 'link',
+        attrs: { rel, crossorigin: '', ...(as ? { as } : {}), href: `/${href}` },
+        injectTo: 'head',
+      });
+      const tags: PreloadTag[] = [];
       for (const [fileName] of Object.entries(ctx.bundle)) {
-        if (fileName.includes('CaptchaPage') && fileName.endsWith('.js')) {
-          tags.push({
-            tag: 'link',
-            attrs: { rel: 'modulepreload', crossorigin: '', href: `/${fileName}` },
-            injectTo: 'head',
-          });
-        }
-        if (fileName.includes('CaptchaPage') && fileName.endsWith('.css')) {
-          tags.push({
-            tag: 'link',
-            attrs: { rel: 'preload', as: 'style', crossorigin: '', href: `/${fileName}` },
-            injectTo: 'head',
-          });
-        }
-        if (fileName.includes('pako') && fileName.endsWith('.js')) {
-          tags.push({
-            tag: 'link',
-            attrs: { rel: 'modulepreload', crossorigin: '', href: `/${fileName}` },
-            injectTo: 'head',
-          });
-        }
-        if (fileName.includes('crypto.worker') && fileName.endsWith('.js')) {
-          tags.push({
-            tag: 'link',
-            attrs: { rel: 'preload', as: 'script', crossorigin: '', href: `/${fileName}` },
-            injectTo: 'head',
-          });
-        }
+        if (fileName.includes('CaptchaPage') && fileName.endsWith('.js'))
+          tags.push(preloadLink('modulepreload', fileName));
+        if (fileName.includes('CaptchaPage') && fileName.endsWith('.css'))
+          tags.push(preloadLink('preload', fileName, 'style'));
+        if (fileName.includes('pako') && fileName.endsWith('.js'))
+          tags.push(preloadLink('modulepreload', fileName));
+        if (fileName.includes('crypto.worker') && fileName.endsWith('.js'))
+          tags.push(preloadLink('preload', fileName, 'script'));
       }
       return tags;
     },

@@ -1,6 +1,5 @@
-import { useMemo, useState, useEffect } from 'react';
-
-const MOBILE_BP = 768;
+import { useMemo } from 'react';
+import { useIsMobile } from '../hooks/useIsMobile';
 
 export function formatTime(ms: number): string {
   const totalSecs = Math.floor(ms / 1000);
@@ -115,14 +114,7 @@ export default function Leaderboard({
   currentLabel = 'YOU',
   title = 'Top Times',
 }: LeaderboardProps) {
-  const [isMobile, setIsMobile] = useState(() => window.innerWidth < MOBILE_BP);
-
-  useEffect(() => {
-    const mql = window.matchMedia(`(max-width: ${MOBILE_BP - 1}px)`);
-    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
-    mql.addEventListener('change', handler);
-    return () => mql.removeEventListener('change', handler);
-  }, []);
+  const isMobile = useIsMobile();
 
   const displayLimit = isMobile ? config.mobileBoardSize : config.boardSize;
 

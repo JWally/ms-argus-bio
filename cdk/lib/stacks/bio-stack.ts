@@ -430,30 +430,28 @@ export class BioStack extends Stack {
     );
 
     // Cache policies
+    const sharedCachePolicyProps = {
+      minTtl: Duration.seconds(0),
+      enableAcceptEncodingBrotli: true,
+      enableAcceptEncodingGzip: true,
+      headerBehavior: cloudfront.CacheHeaderBehavior.none(),
+      cookieBehavior: cloudfront.CacheCookieBehavior.none(),
+      queryStringBehavior: cloudfront.CacheQueryStringBehavior.none(),
+    };
     const staticAssetsCachePolicy = new cloudfront.CachePolicy(this, 'StaticAssetsCachePolicy', {
+      ...sharedCachePolicyProps,
       cachePolicyName: `${stackName}-static-assets-cache`,
       comment: 'Cache policy for static assets with compression',
       defaultTtl: Duration.days(30),
       maxTtl: Duration.days(365),
-      minTtl: Duration.seconds(0),
-      enableAcceptEncodingBrotli: true,
-      enableAcceptEncodingGzip: true,
-      headerBehavior: cloudfront.CacheHeaderBehavior.none(),
-      cookieBehavior: cloudfront.CacheCookieBehavior.none(),
-      queryStringBehavior: cloudfront.CacheQueryStringBehavior.none(),
     });
 
     const htmlCachePolicy = new cloudfront.CachePolicy(this, 'HtmlCachePolicy', {
+      ...sharedCachePolicyProps,
       cachePolicyName: `${stackName}-html-no-cache`,
       comment: 'No cache policy for HTML files with compression',
       defaultTtl: Duration.seconds(0),
       maxTtl: Duration.days(1),
-      minTtl: Duration.seconds(0),
-      enableAcceptEncodingBrotli: true,
-      enableAcceptEncodingGzip: true,
-      headerBehavior: cloudfront.CacheHeaderBehavior.none(),
-      cookieBehavior: cloudfront.CacheCookieBehavior.none(),
-      queryStringBehavior: cloudfront.CacheQueryStringBehavior.none(),
     });
 
     const s3Origin = new origins.S3Origin(siteBucket, {

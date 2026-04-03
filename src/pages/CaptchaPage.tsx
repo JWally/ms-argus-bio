@@ -6,22 +6,12 @@ import DotChallenge from '../components/DotChallenge';
 import {
   computeFeatures,
   normalizeStrokes,
-  detectTampering,
-  detectCDP,
   type DigitResult,
   type ConfidenceSnapshot,
   type VerdictResult,
 } from '../utils/biometrics';
-import { runTripwire, type TripwireResult } from '../vm/tripwire';
-import { measureAsync, measureSync, observeLongTasks } from '../utils/perf';
-import {
-  buildClientImage,
-  mask1bitTo8bit,
-  CLIENT_IMAGE_WIDTH,
-  CLIENT_IMAGE_HEIGHT,
-} from '../utils/mask';
-import { extractServerKey } from '../utils/crypto';
-import { initCrypto, workerDecrypt, workerEncrypt } from '../utils/crypto-worker-client';
+import { measureSync, observeLongTasks } from '../utils/perf';
+import { isEmbedded } from '../utils/embed';
 import {
   loadProgress,
   saveProgress,
@@ -30,86 +20,23 @@ import {
   type Tier,
   type BoardEntry,
 } from '../utils/progression';
+import { useChallenge } from '../hooks/useChallenge';
+import { useVerdictFlow } from '../hooks/useVerdictFlow';
+import { MSG_ERROR, MSG_VERIFIED } from '../constants';
+import { formatTime } from '../components/Leaderboard';
 import '../App.css';
 
 type AppState = 'loading' | 'idle' | 'active' | 'complete';
 
-const API_URL = import.meta.env.VITE_API_URL as string | undefined;
-
-// Eagerly start ECDH key generation so it's ready before first fetchChallenge
-const cryptoReady = API_URL ? initCrypto() : null;
+const TIMEOUT_MS = 30_000;
+const MEASURE_BIOMETRICS = 'compute:biometrics';
+const LOADING_MSG = 'Initializing...';
 
 // Start long-task observer for profiling
 observeLongTasks();
 
-function isEmbedded(): boolean {
-  return new URLSearchParams(window.location.search).get('embed') === '1';
-}
-
 // Lock body to viewport when embedded in iframe
 if (isEmbedded()) document.body.classList.add('embedded');
-
-const TIMEOUT_MS = 30_000;
-const MSG_ERROR = 'argus-bio-error';
-const MEASURE_BIOMETRICS = 'compute:biometrics';
-
-// ── Glyph type ──────────────────────────────────────────────────────
-// The client no longer knows the character or modelIndex.
-// It only receives an image for display; the server validates via EMNIST inference.
-interface Glyph {
-  /** Base64-encoded 8-bit grayscale image from the server */
-  image: string;
-}
-
-// ── Fallback for local dev without API ──────────────────────────────
-// Excluded: D (too similar to O), Q (too similar to O), V (too similar to U)
-const FALLBACK_LETTERS = [
-  'A',
-  'B',
-  'C',
-  'E',
-  'F',
-  'G',
-  'H',
-  'I',
-  'J',
-  'K',
-  'L',
-  'M',
-  'N',
-  'O',
-  'P',
-  'R',
-  'S',
-  'T',
-  'U',
-  'W',
-  'X',
-  'Y',
-  'Z',
-];
-
-function generateFallbackChallenge(): Glyph[] {
-  const len = 3 + Math.floor(Math.random() * 2); // 3 or 4
-  const unique: string[] = [];
-  const used = new Set<string>();
-  while (unique.length < len - 1) {
-    const ch = FALLBACK_LETTERS[Math.floor(Math.random() * FALLBACK_LETTERS.length)];
-    if (!used.has(ch)) {
-      used.add(ch);
-      unique.push(ch);
-    }
-  }
-  const repeatIdx = Math.floor(Math.random() * unique.length);
-  const all = [...unique, unique[repeatIdx]];
-  for (let i = all.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [all[i], all[j]] = [all[j], all[i]];
-  }
-  return all.map((ch) => ({ image: buildClientImage(ch) }));
-}
-
-// ── Types ────────────────────────────────────────────────────────────
 
 interface FinalResult {
   totalTimeMs: number;
@@ -118,30 +45,14 @@ interface FinalResult {
   features: ReturnType<typeof computeFeatures>;
 }
 
-function formatTime(ms: number): string {
-  const totalSecs = Math.floor(ms / 1000);
-  const mins = Math.floor(totalSecs / 60);
-  const secs = totalSecs % 60;
-  const millis = Math.floor(ms % 1000);
-  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}.${String(millis).padStart(3, '0')}`;
-}
-
 // ── CaptchaPage ─────────────────────────────────────────────────────
 
 export default function CaptchaPage() {
   const [state, setState] = useState<AppState>('loading');
-  const [loadingMsg] = useState('Initializing...');
-  const [challenge, setChallenge] = useState<Glyph[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [elapsedMs, setElapsedMs] = useState(0);
   const [flashKey, setFlashKey] = useState(0);
-  const [flashColor, setFlashColor] = useState<'green' | 'red'>('green');
   const [finalResult, setFinalResult] = useState<FinalResult | null>(null);
-  const [verdict, setVerdict] = useState<VerdictResult | null>(null);
-  const [argusToken, setArgusToken] = useState<string | null>(null);
-  const [returnUrl, setReturnUrl] = useState<string | null>(null);
-  const [retryMsg, setRetryMsg] = useState<string | null>(null);
-  const [sessionError, setSessionError] = useState<string | null>(null);
 
   // Progression state
   const [progress, setProgress] = useState(loadProgress);
@@ -156,251 +67,113 @@ export default function CaptchaPage() {
   const startTimeRef = useRef(0);
   const glyphStartTimeRef = useRef(0);
   const currentIndexRef = useRef(0);
-  const challengeRef = useRef<Glyph[]>([]);
   const digitResultsRef = useRef<DigitResult[]>([]);
   const allStrokesRef = useRef<Stroke[]>([]);
   const confidenceTimelineRef = useRef<ConfidenceSnapshot[]>([]);
-  const sessionIdRef = useRef<string | null>(
-    new URLSearchParams(window.location.search).get('sid')
-  );
-  const challengeIdRef = useRef<string>('');
-  const rawPublicKeyRef = useRef<string>('');
-  const serverPubKeyRef = useRef<string>('');
-  const [imageDims, setImageDims] = useState({ w: CLIENT_IMAGE_WIDTH, h: CLIENT_IMAGE_HEIGHT });
 
-  /** Fetch a challenge from the server, or fall back to client-side generation.
-   *  Also performs ECDH key exchange: sends client pubkey, extracts server pubkey. */
-  const fetchChallenge = useCallback(async (): Promise<Glyph[]> => {
-    if (!API_URL) return generateFallbackChallenge();
-    try {
-      // Use eagerly-started crypto or reuse from previous round
-      if (!rawPublicKeyRef.current) {
-        const { rawPublicKey } = await measureAsync(
-          'crypto:init',
-          () => cryptoReady ?? initCrypto()
-        );
-        rawPublicKeyRef.current = rawPublicKey;
-      }
+  const onChallengeReady = useCallback(() => setState('idle'), []);
 
-      const headers: Record<string, string> = {};
-      if (rawPublicKeyRef.current) {
-        headers['X-Canvas-Fp'] = rawPublicKeyRef.current;
-      }
+  const {
+    challenge,
+    challengeRef,
+    imageDims,
+    sessionError,
+    challengeIdRef,
+    rawPublicKeyRef,
+    serverPubKeyRef,
+    sessionIdRef,
+    reload: reloadChallenge,
+  } = useChallenge(onChallengeReady);
 
-      const challengeParams = new URLSearchParams();
-      if (sessionIdRef.current) challengeParams.set('sid', sessionIdRef.current);
-      const challengeQs = challengeParams.toString();
-      const data = await measureAsync('fetch:challenge', async () => {
-        const res = await fetch(`${API_URL}/v1/challenge${challengeQs ? `?${challengeQs}` : ''}`, {
-          headers,
-        });
-        return res.json();
-      });
+  const {
+    verdict,
+    argusToken,
+    returnUrl,
+    retryMsg,
+    submitPayload,
+    reset: resetVerdict,
+  } = useVerdictFlow({
+    allStrokesRef,
+    digitResultsRef,
+    confidenceTimelineRef,
+    canvasRef,
+    challengeRef,
+    challengeIdRef,
+    rawPublicKeyRef,
+    serverPubKeyRef,
+    sessionIdRef,
+  });
 
-      if (data.error) {
-        setSessionError(data.error);
-        if (isEmbedded()) {
-          window.parent.postMessage({ type: MSG_ERROR, error: data.error }, '*');
-        }
-        return [];
-      }
+  // Generate tier board + update PR when captcha completes
+  const updateBoardAndProgress = useCallback(
+    (timeMs: number) => {
+      const tier = progress.currentTier;
+      const prev = progress.bestByTier[tier];
+      const baseline = progress.baselineByTier?.[tier];
 
-      // Extract server's public key appended to challengeId
-      const extracted = extractServerKey(data.challengeId as string);
-      challengeIdRef.current = extracted.challengeId;
-      if (extracted.serverPubKey) {
-        serverPubKeyRef.current = extracted.serverPubKey;
-      }
+      const board = generateBoard(timeMs, tier, progress.playerId, baseline);
+      setBoardEntries(board);
 
-      // Decrypt or read plaintext challenge data.
-      // Handles both new format (8-bit images) and old format (1-bit masks).
-      let images: string[];
-      let dims: { w: number; h: number };
-      if (data.enc && rawPublicKeyRef.current && extracted.serverPubKey) {
-        const decrypted = await measureAsync('crypto:decrypt-challenge', () =>
-          workerDecrypt(data.enc as string, extracted.serverPubKey)
-        );
-        if ('images' in decrypted) {
-          images = decrypted.images;
-          dims = { w: decrypted.width, h: decrypted.height };
-        } else {
-          // Old server format — convert 1-bit masks to 8-bit images
-          images = decrypted.masks.map((m) =>
-            mask1bitTo8bit(m, decrypted.maskWidth, decrypted.maskHeight)
-          );
-          dims = { w: decrypted.maskWidth, h: decrypted.maskHeight };
-        }
-      } else if (Array.isArray(data.images)) {
-        images = data.images as string[];
-        dims = { w: data.width, h: data.height };
+      const playerEntry = board.find((e) => e.isPlayer);
+      const rank = playerEntry?.rank ?? board.length;
+      const beatPR = prev !== undefined && timeMs < prev;
+
+      if (rank === 1 && getNextTier(tier)) {
+        setBoardMode('cleared');
+        setTierCleared(true);
+      } else if (!prev || beatPR) {
+        setBoardMode('normal');
+      } else if (rank <= 5) {
+        setBoardMode('shake');
       } else {
-        // Old plaintext format
-        images = (data.masks as string[]).map((m: string) =>
-          mask1bitTo8bit(m, data.maskWidth, data.maskHeight)
-        );
-        dims = { w: data.maskWidth, h: data.maskHeight };
+        setBoardMode('off-pace');
       }
-      const result = images.map((image) => ({ image }));
-      setImageDims(dims);
-      return result;
-    } catch {
-      challengeIdRef.current = '';
-      return generateFallbackChallenge();
-    }
-  }, []);
 
-  // Fetch server challenge on mount
-  useEffect(() => {
-    const init = async () => {
-      const c = await fetchChallenge();
-      setChallenge(c);
-      challengeRef.current = c;
-      setState('idle');
-    };
-    init();
-  }, [fetchChallenge]);
+      setIsNewPR(beatPR);
 
-  const logPayload = useCallback((totalTimeMs: number, timedOut: boolean) => {
-    const features = measureSync(MEASURE_BIOMETRICS, () => computeFeatures(allStrokesRef.current));
-    const tamperedApis = measureSync('detect:tampering', () => [
-      ...detectTampering(),
-      ...detectCDP(),
-    ]);
-
-    const payload = {
-      challengeId: challengeIdRef.current || crypto.randomUUID(),
-      // Don't leak expected answers — just send glyph count (all letters)
-      challenge: challengeRef.current.map(() => 1),
-      timestamp: Date.now(),
-      completionTimeMs: totalTimeMs,
-      passed: !timedOut,
-      digits: digitResultsRef.current,
-      confidenceTimeline: confidenceTimelineRef.current,
-      inputType: canvasRef.current?.getInputType() ?? 'unknown',
-      screenWidth: window.screen.width,
-      screenHeight: window.screen.height,
-      devicePixelRatio: window.devicePixelRatio,
-      userAgent: navigator.userAgent,
-      features,
-      tamperedApis,
-      vmHash: '' as string,
-      ...(sessionIdRef.current ? { sessionId: sessionIdRef.current } : {}),
-    };
-
-    // Run tripwire VM with payload + serverPubKey for pristine ECDH encryption.
-    // The bridge modifies `payload` in-place (sets vmHash, immolates if tampered).
-    const tripwirePromise = measureAsync('vm:tripwire', () =>
-      runTripwire(
-        allStrokesRef.current,
-        features,
-        payload as Record<string, unknown>,
-        serverPubKeyRef.current || undefined
-      )
-    ).catch(
-      (): TripwireResult => ({
-        tampered: false,
-        vmSignals: [],
-        vmIntegrityHash: '',
-      })
-    );
-
-    // eslint-disable-next-line no-console
-    void tripwirePromise.then(() => console.log('[ARGUS BIO] Biometric Payload', payload));
-
-    const fallbackVerdict: VerdictResult = {
-      verdict: 'uncertain',
-    };
-
-    if (!API_URL) {
-      setVerdict(fallbackVerdict);
-      return;
-    }
-
-    const ctrl = new AbortController();
-    const timeout = setTimeout(() => ctrl.abort(), 10_000);
-
-    // Wait for tripwire to complete before sending
-    tripwirePromise.then((tw) => {
-      performance.mark('fetch:classify:start');
-      let sendRequest: Promise<Response>;
-
-      if (tw.encrypted && tw.publicKeyB64) {
-        // Use pristine VM crypto — bot hooks on crypto.subtle never see this
-        sendRequest = fetch(`${API_URL}/v1/classify`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/octet-stream',
-            'X-Canvas-Fp': tw.publicKeyB64,
+      if (!prev || timeMs < prev) {
+        const updated = {
+          ...progress,
+          bestByTier: { ...progress.bestByTier, [tier]: timeMs },
+          baselineByTier: {
+            ...progress.baselineByTier,
+            ...(!baseline ? { [tier]: timeMs } : {}),
           },
-          body: tw.encrypted.buffer as ArrayBuffer,
-          signal: ctrl.signal,
-        });
-      } else {
-        // Fallback: worker encrypt or plain JSON
-        const canEncrypt = rawPublicKeyRef.current && serverPubKeyRef.current;
-        sendRequest = canEncrypt
-          ? workerEncrypt(payload, serverPubKeyRef.current).then((encrypted) =>
-              fetch(`${API_URL}/v1/classify`, {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/octet-stream',
-                  'X-Canvas-Fp': rawPublicKeyRef.current,
-                },
-                body: encrypted.buffer as ArrayBuffer,
-                signal: ctrl.signal,
-              })
-            )
-          : fetch(`${API_URL}/v1/classify`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(payload),
-              signal: ctrl.signal,
-            });
+        };
+        setProgress(updated);
+        saveProgress(updated);
       }
+    },
+    [progress]
+  );
 
-      sendRequest
-        .then((res) => res.json())
-        .then((v) => {
-          // eslint-disable-next-line no-console
-          console.log('[ARGUS BIO] Verdict', v);
-          if (v.error) {
-            // eslint-disable-next-line no-console
-            console.error('[ARGUS BIO] Server error:', v.error);
-            if (isEmbedded()) {
-              window.parent.postMessage({ type: MSG_ERROR, error: v.error }, '*');
-            }
-            setRetryMsg(v.error);
-            return;
-          }
-          if (v.retry) {
-            setRetryMsg(v.message || 'Incorrect. Try again!');
-            return;
-          }
-          const result = v as VerdictResult;
-          setVerdict(result);
-          if (result.token) setArgusToken(result.token);
-          if (result.returnUrl) setReturnUrl(result.returnUrl);
-        })
-        .catch((err) => {
-          // eslint-disable-next-line no-console
-          console.error('[ARGUS BIO] Classification error', err);
-          setVerdict(fallbackVerdict);
-          if (isEmbedded()) {
-            setTimeout(() => {
-              window.parent.postMessage(
-                { type: MSG_ERROR, error: 'Verification error. Please try again.' },
-                '*'
-              );
-            }, 2000);
-          }
-        })
-        .finally(() => {
-          performance.mark('fetch:classify:end');
-          performance.measure('fetch:classify', 'fetch:classify:start', 'fetch:classify:end');
-          clearTimeout(timeout);
+  const advance = useCallback(
+    (now: number) => {
+      const nextIndex = currentIndexRef.current + 1;
+      if (nextIndex >= challengeRef.current.length) {
+        activeRef.current = false;
+        cancelAnimationFrame(timerRafRef.current);
+        const totalTime = now - startTimeRef.current;
+        setElapsedMs(totalTime);
+        setCurrentIndex(nextIndex);
+        setFinalResult({
+          totalTimeMs: totalTime,
+          timedOut: false,
+          digits: [...digitResultsRef.current],
+          features: measureSync(MEASURE_BIOMETRICS, () => computeFeatures(allStrokesRef.current)),
         });
-    }); // end tripwirePromise.then
-  }, []);
+        setState('complete');
+        submitPayload(totalTime, false);
+        updateBoardAndProgress(totalTime);
+      } else {
+        currentIndexRef.current = nextIndex;
+        setCurrentIndex(nextIndex);
+        glyphStartTimeRef.current = now;
+        canvasRef.current?.clear();
+      }
+    },
+    [submitPayload, updateBoardAndProgress, challengeRef]
+  );
 
   // Start game on first canvas touch
   const handleCanvasPointerDown = useCallback(() => {
@@ -444,80 +217,6 @@ export default function CaptchaPage() {
     timerRafRef.current = requestAnimationFrame(tickTimer);
   }, [state]);
 
-  // Generate tier board + update PR when captcha completes
-  const updateBoardAndProgress = useCallback(
-    (timeMs: number) => {
-      const tier = progress.currentTier;
-      const prev = progress.bestByTier[tier];
-      const baseline = progress.baselineByTier?.[tier];
-
-      // Generate board anchored to baseline (or current time on first attempt)
-      const board = generateBoard(timeMs, tier, progress.playerId, baseline);
-      setBoardEntries(board);
-
-      const playerEntry = board.find((e) => e.isPlayer);
-      const rank = playerEntry?.rank ?? board.length;
-      const beatPR = prev !== undefined && timeMs < prev;
-
-      // Determine display mode (computed BEFORE state updates)
-      if (rank === 1 && getNextTier(tier)) {
-        setBoardMode('cleared');
-        setTierCleared(true);
-      } else if (!prev || beatPR) {
-        setBoardMode('normal'); // first attempt or new PR
-      } else if (rank <= 5) {
-        setBoardMode('shake'); // solid but not PR
-      } else {
-        setBoardMode('off-pace'); // fell below leaders
-      }
-
-      setIsNewPR(beatPR);
-
-      // Persist best + baseline
-      if (!prev || timeMs < prev) {
-        const updated = {
-          ...progress,
-          bestByTier: { ...progress.bestByTier, [tier]: timeMs },
-          baselineByTier: {
-            ...progress.baselineByTier,
-            ...(!baseline ? { [tier]: timeMs } : {}),
-          },
-        };
-        setProgress(updated);
-        saveProgress(updated);
-      }
-    },
-    [progress]
-  );
-
-  const advance = useCallback(
-    (now: number) => {
-      const nextIndex = currentIndexRef.current + 1;
-      if (nextIndex >= challengeRef.current.length) {
-        activeRef.current = false;
-        cancelAnimationFrame(timerRafRef.current);
-        const totalTime = now - startTimeRef.current;
-        setElapsedMs(totalTime);
-        setCurrentIndex(nextIndex);
-        setFinalResult({
-          totalTimeMs: totalTime,
-          timedOut: false,
-          digits: [...digitResultsRef.current],
-          features: measureSync(MEASURE_BIOMETRICS, () => computeFeatures(allStrokesRef.current)),
-        });
-        setState('complete');
-        logPayload(totalTime, false);
-        updateBoardAndProgress(totalTime);
-      } else {
-        currentIndexRef.current = nextIndex;
-        setCurrentIndex(nextIndex);
-        glyphStartTimeRef.current = now;
-        canvasRef.current?.clear();
-      }
-    },
-    [logPayload, updateBoardAndProgress]
-  );
-
   const handleNext = useCallback(() => {
     if (!activeRef.current) return;
     const canvas = canvasRef.current?.getCanvas();
@@ -556,11 +255,10 @@ export default function CaptchaPage() {
       advance(now);
     } else {
       // Empty canvas — retry with red flash
-      setFlashColor('red');
       setFlashKey((k) => k + 1);
       canvasRef.current?.clear();
     }
-  }, [advance]);
+  }, [advance, challengeRef]);
 
   const handleErase = useCallback(() => {
     canvasRef.current?.clear();
@@ -573,22 +271,16 @@ export default function CaptchaPage() {
     setElapsedMs(0);
     setCurrentIndex(0);
     setFinalResult(null);
-    setVerdict(null);
-    setArgusToken(null);
-    setReturnUrl(null);
-    setRetryMsg(null);
+    resetVerdict();
     setBoardMode('normal');
     setIsNewPR(false);
     currentIndexRef.current = 0;
     digitResultsRef.current = [];
     allStrokesRef.current = [];
     confidenceTimelineRef.current = [];
-
-    const c = await fetchChallenge();
-    setChallenge(c);
-    challengeRef.current = c;
+    await reloadChallenge();
     setState('idle');
-  }, [fetchChallenge]);
+  }, [reloadChallenge, resetVerdict]);
 
   // Auto-advance to next tier after tier-cleared celebration
   useEffect(() => {
@@ -616,7 +308,7 @@ export default function CaptchaPage() {
   useEffect(() => {
     if (!argusToken || !isEmbedded()) return;
     const id = setTimeout(() => {
-      window.parent.postMessage({ type: 'argus-bio-verified', token: argusToken }, '*');
+      window.parent.postMessage({ type: MSG_VERIFIED, token: argusToken }, '*');
     }, 1500);
     return () => clearTimeout(id);
   }, [argusToken]);
@@ -649,7 +341,7 @@ export default function CaptchaPage() {
 
   return (
     <div className={`app ${state === 'complete' ? 'app-complete' : ''}`}>
-      {flashKey > 0 && <div key={flashKey} className={`flash-overlay flash-${flashColor}`} />}
+      {flashKey > 0 && <div key={flashKey} className="flash-overlay flash-red" />}
       <header>
         <h1>
           ARGUS <span className="accent">BIO</span>
@@ -668,7 +360,7 @@ export default function CaptchaPage() {
       {!sessionError && state === 'loading' && (
         <div className="loading-panel">
           <div className="spinner" />
-          <p className="loading-msg">{loadingMsg}</p>
+          <p className="loading-msg">{LOADING_MSG}</p>
         </div>
       )}
 

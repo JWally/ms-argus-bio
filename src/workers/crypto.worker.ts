@@ -69,17 +69,10 @@ function buildAnimDots(pixels: Uint8Array, iw: number, ih: number, cw: number): 
         Math.sqrt((jx - cw / 2) ** 2 + (jy - CANVAS_H / 2) ** 2) /
         Math.sqrt((cw / 2) ** 2 + (CANVAS_H / 2) ** 2);
       const bg = isLetter && dRatio < 0.7 ? rndPick(BG_SPOTLIGHT) : rndPick(BG_MUTED);
-      const sz = Math.random();
-      const r =
-        sz < 0.25
-          ? Math.max(0.8, 1 + Math.random() * 0.8)
-          : sz < 0.45
-            ? Math.max(0.8, 1.8 + Math.random() * 0.8)
-            : Math.max(0.8, DOT_R + (Math.random() - 0.5) * 1.2);
       dots.push({
         x: jx,
         y: jy,
-        r,
+        r: pickRadius(),
         on: isLetter ? rndPick(LETTER_COLORS) : bg,
         off: bg,
         isLetter,
@@ -91,6 +84,15 @@ function buildAnimDots(pixels: Uint8Array, iw: number, ih: number, cw: number): 
 
   addSnowDots(dots, cw);
   return dots;
+}
+
+function pickRadius(): number {
+  const sz = Math.random();
+  return sz < 0.25
+    ? Math.max(0.8, 1 + Math.random() * 0.8)
+    : sz < 0.45
+      ? Math.max(0.8, 1.8 + Math.random() * 0.8)
+      : Math.max(0.8, DOT_R + (Math.random() - 0.5) * 1.2);
 }
 
 /** Scatter out-of-phase snow dots — denser away from letter to preserve legibility. */
@@ -114,18 +116,10 @@ function addSnowDots(dots: AnimDot[], cw: number): void {
 
     if (Math.random() > Math.min(1, minDist / 25)) continue;
 
-    const sz = Math.random();
-    const r =
-      sz < 0.25
-        ? Math.max(0.8, 1 + Math.random() * 0.8)
-        : sz < 0.45
-          ? Math.max(0.8, 1.8 + Math.random() * 0.8)
-          : Math.max(0.8, DOT_R + (Math.random() - 0.5) * 1.2);
-
     dots.push({
       x: sx,
       y: sy,
-      r,
+      r: pickRadius(),
       on: rndPick(SNOW_ON_COLORS),
       off: rndPick(BG_SPOTLIGHT), // off-state stays slightly lit, reduces strobe contrast
       isLetter: false,

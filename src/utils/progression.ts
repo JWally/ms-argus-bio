@@ -162,27 +162,20 @@ export function generateBoard(
   const [fastLo, fastHi] = TIER_FAST_RANGE[tier];
   const [slowLo, slowHi] = TIER_SLOW_RANGE[tier];
 
-  // Generate faster entries anchored to the reference (baseline) time
-  for (let i = 0; i < fasterCount; i++) {
-    const t = fasterCount === 1 ? 0.5 : i / (fasterCount - 1);
-    const mult = fastLo + t * (fastHi - fastLo);
-    const jitter = 1 + (rng() - 0.5) * 0.04;
-    entries.push({
-      label: ARCADE_INITIALS[Math.floor(rng() * ARCADE_INITIALS.length)],
-      timeMs: Math.round(refTime * mult * jitter),
-    });
-  }
+  const addEntries = (count: number, rangeLo: number, rangeHi: number) => {
+    for (let i = 0; i < count; i++) {
+      const t = count === 1 ? 0.5 : i / (count - 1);
+      const mult = rangeLo + t * (rangeHi - rangeLo);
+      const jitter = 1 + (rng() - 0.5) * 0.04;
+      entries.push({
+        label: ARCADE_INITIALS[Math.floor(rng() * ARCADE_INITIALS.length)],
+        timeMs: Math.round(refTime * mult * jitter),
+      });
+    }
+  };
 
-  // Generate slower entries anchored to the reference (baseline) time
-  for (let i = 0; i < slowerCount; i++) {
-    const t = slowerCount === 1 ? 0.5 : i / (slowerCount - 1);
-    const mult = slowLo + t * (slowHi - slowLo);
-    const jitter = 1 + (rng() - 0.5) * 0.04;
-    entries.push({
-      label: ARCADE_INITIALS[Math.floor(rng() * ARCADE_INITIALS.length)],
-      timeMs: Math.round(refTime * mult * jitter),
-    });
-  }
+  addEntries(fasterCount, fastLo, fastHi);
+  addEntries(slowerCount, slowLo, slowHi);
 
   // Sort all entries + player by time
   const all: BoardEntry[] = entries
