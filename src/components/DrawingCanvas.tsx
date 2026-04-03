@@ -106,16 +106,17 @@ const DrawingCanvas = forwardRef<CanvasHandle, Props>(({ disabled }, ref) => {
   }, []);
 
   function makeBasePoint(e: React.PointerEvent, pos: { x: number; y: number }) {
+    const t = performance.now();
     return {
       x: pos.x,
       y: pos.y,
-      t: performance.now(),
+      t,
       pressure: e.pressure,
       tiltX: e.tiltX,
       tiltY: e.tiltY,
       width: e.width,
       height: e.height,
-      timestampDelta: performance.now() - e.timeStamp,
+      timestampDelta: t - e.timeStamp,
     };
   }
 
