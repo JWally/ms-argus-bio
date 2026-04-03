@@ -8,6 +8,8 @@ import { SSMClient, PutParameterCommand, GetParameterCommand } from '@aws-sdk/cl
 const STACK_NAME = process.env.STACK_NAME || 'ms-argus-bio-dev-jw';
 const PARAM_NAME = `/${STACK_NAME}/ecdh-keypair`;
 
+// jscpd:ignore-start — generateKeyPair is intentionally duplicated in server/rotate-ecdh.ts;
+// the script runs in Node.js (no Lambda context), so it cannot import from server/.
 async function generateKeyPair() {
   const keyPair = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, [
     'deriveKey',
@@ -25,6 +27,7 @@ async function generateKeyPair() {
     createdAt: Date.now(),
   };
 }
+// jscpd:ignore-end
 
 async function main() {
   const ssm = new SSMClient({ region: 'us-east-1' });

@@ -105,6 +105,20 @@ const DrawingCanvas = forwardRef<CanvasHandle, Props>(({ disabled }, ref) => {
     return () => canvas.removeEventListener('pointerrawupdate', handler);
   }, []);
 
+  function makeBasePoint(e: React.PointerEvent, pos: { x: number; y: number }) {
+    return {
+      x: pos.x,
+      y: pos.y,
+      t: performance.now(),
+      pressure: e.pressure,
+      tiltX: e.tiltX,
+      tiltY: e.tiltY,
+      width: e.width,
+      height: e.height,
+      timestampDelta: performance.now() - e.timeStamp,
+    };
+  }
+
   const getPos = useCallback((e: React.PointerEvent) => {
     const canvas = canvasRef.current!;
     const rect = canvas.getBoundingClientRect();
@@ -122,20 +136,12 @@ const DrawingCanvas = forwardRef<CanvasHandle, Props>(({ disabled }, ref) => {
       inputTypeRef.current = e.pointerType;
       const pos = getPos(e);
       const point: StrokePoint = {
-        x: pos.x,
-        y: pos.y,
-        t: performance.now(),
-        pressure: e.pressure,
-        tiltX: e.tiltX,
-        tiltY: e.tiltY,
-        width: e.width,
-        height: e.height,
+        ...makeBasePoint(e, pos),
         coalescedCount: 0, // pointerdown is always a single event
         coalescedSpoofed: false,
         movementX: 0,
         movementY: 0,
         predictedCount: 0,
-        timestampDelta: performance.now() - e.timeStamp,
         rawUpdateCount: 0, // pointerdown is a single event
       };
       rawUpdateCountRef.current = 0; // reset counter for upcoming moves
@@ -158,20 +164,12 @@ const DrawingCanvas = forwardRef<CanvasHandle, Props>(({ disabled }, ref) => {
       const pos = getPos(e);
       const coalesced = (e.nativeEvent as PointerEvent).getCoalescedEvents?.() ?? [];
       const point: StrokePoint = {
-        x: pos.x,
-        y: pos.y,
-        t: performance.now(),
-        pressure: e.pressure,
-        tiltX: e.tiltX,
-        tiltY: e.tiltY,
-        width: e.width,
-        height: e.height,
+        ...makeBasePoint(e, pos),
         coalescedCount: coalesced.length,
         coalescedSpoofed: isCoalescedSpoofed(coalesced),
         movementX: e.movementX,
         movementY: e.movementY,
         predictedCount: (e.nativeEvent as PointerEvent).getPredictedEvents?.()?.length ?? 0,
-        timestampDelta: performance.now() - e.timeStamp,
         rawUpdateCount: rawUpdateCountRef.current,
       };
       rawUpdateCountRef.current = 0; // reset for next pointermove

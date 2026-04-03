@@ -17,7 +17,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const MASK_W = 64;
 const MASK_H = 48;
 
-// Same glyph set as CaptchaPage.tsx / handler.ts (letters only)
+// Same glyph set as useChallenge.ts FALLBACK_LETTERS (letters only, see that file for exclusion notes)
+// jscpd:ignore-start
 const GLYPHS = [
   'A',
   'B',
@@ -43,6 +44,7 @@ const GLYPHS = [
   'Y',
   'Z',
 ];
+// jscpd:ignore-end
 
 // Font variants — distinct families produce structurally different letterforms.
 // Each entry: [fontSpec, yOffset] to account for baseline differences.

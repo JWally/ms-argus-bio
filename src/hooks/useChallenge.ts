@@ -21,6 +21,7 @@ export interface Glyph {
 
 // ── Fallback for local dev without API ──────────────────────────────
 // Excluded: D (too similar to O), Q (too similar to O), V (too similar to U)
+// jscpd:ignore-start
 const FALLBACK_LETTERS = [
   'A',
   'B',
@@ -46,6 +47,7 @@ const FALLBACK_LETTERS = [
   'Y',
   'Z',
 ];
+// jscpd:ignore-end
 
 function generateFallbackChallenge(): Glyph[] {
   const len = 3 + Math.floor(Math.random() * 2); // 3 or 4
