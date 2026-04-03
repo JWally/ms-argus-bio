@@ -50,6 +50,8 @@ function isEmbedded(): boolean {
 if (isEmbedded()) document.body.classList.add('embedded');
 
 const TIMEOUT_MS = 30_000;
+const MSG_ERROR = 'argus-bio-error';
+const MEASURE_BIOMETRICS = 'compute:biometrics';
 
 // ── Glyph type ──────────────────────────────────────────────────────
 // The client no longer knows the character or modelIndex.
@@ -198,7 +200,7 @@ export default function CaptchaPage() {
       if (data.error) {
         setSessionError(data.error);
         if (isEmbedded()) {
-          window.parent.postMessage({ type: 'argus-bio-error', error: data.error }, '*');
+          window.parent.postMessage({ type: MSG_ERROR, error: data.error }, '*');
         }
         return [];
       }
@@ -259,9 +261,7 @@ export default function CaptchaPage() {
   }, [fetchChallenge]);
 
   const logPayload = useCallback((totalTimeMs: number, timedOut: boolean) => {
-    const features = measureSync('compute:biometrics', () =>
-      computeFeatures(allStrokesRef.current)
-    );
+    const features = measureSync(MEASURE_BIOMETRICS, () => computeFeatures(allStrokesRef.current));
     const tamperedApis = measureSync('detect:tampering', () => [
       ...detectTampering(),
       ...detectCDP(),
@@ -367,7 +367,7 @@ export default function CaptchaPage() {
             // eslint-disable-next-line no-console
             console.error('[ARGUS BIO] Server error:', v.error);
             if (isEmbedded()) {
-              window.parent.postMessage({ type: 'argus-bio-error', error: v.error }, '*');
+              window.parent.postMessage({ type: MSG_ERROR, error: v.error }, '*');
             }
             setRetryMsg(v.error);
             return;
@@ -388,7 +388,7 @@ export default function CaptchaPage() {
           if (isEmbedded()) {
             setTimeout(() => {
               window.parent.postMessage(
-                { type: 'argus-bio-error', error: 'Verification error. Please try again.' },
+                { type: MSG_ERROR, error: 'Verification error. Please try again.' },
                 '*'
               );
             }, 2000);
@@ -434,7 +434,7 @@ export default function CaptchaPage() {
           totalTimeMs: TIMEOUT_MS,
           timedOut: true,
           digits: [...digitResultsRef.current],
-          features: measureSync('compute:biometrics', () => computeFeatures(allStrokesRef.current)),
+          features: measureSync(MEASURE_BIOMETRICS, () => computeFeatures(allStrokesRef.current)),
         });
         setState('complete');
         return;
@@ -503,7 +503,7 @@ export default function CaptchaPage() {
           totalTimeMs: totalTime,
           timedOut: false,
           digits: [...digitResultsRef.current],
-          features: measureSync('compute:biometrics', () => computeFeatures(allStrokesRef.current)),
+          features: measureSync(MEASURE_BIOMETRICS, () => computeFeatures(allStrokesRef.current)),
         });
         setState('complete');
         logPayload(totalTime, false);
@@ -626,7 +626,7 @@ export default function CaptchaPage() {
     if (!verdict || argusToken || !isEmbedded()) return;
     const id = setTimeout(() => {
       window.parent.postMessage(
-        { type: 'argus-bio-error', error: 'Verification failed. Please try again.' },
+        { type: MSG_ERROR, error: 'Verification failed. Please try again.' },
         '*'
       );
     }, 2000);

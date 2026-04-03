@@ -46,6 +46,7 @@ interface Dot {
   realColor: string;
   bgColor: string;
   isDigit: boolean;
+  isSnow: boolean;
   frameGroup: number;
 }
 
@@ -132,11 +133,48 @@ function computeDots({ pixels, iw, ih, activeSlot, w, h, slotW }: ComputeDotsOpt
         realColor,
         bgColor,
         isDigit,
+        isSnow: false,
         frameGroup: Math.floor(Math.random() * NUM_FRAMES),
       });
     }
   }
+
+  addSnowDots(dots, w, h);
   return dots;
+}
+
+/** Scatter out-of-phase snow dots — denser away from letter to preserve legibility. */
+function addSnowDots(dots: Dot[], w: number, h: number): void {
+  const SNOW_COLORS = ['#6366f1', '#7c3aed', '#60a5fa', '#7c3aed', '#4f46e5'];
+  const letterDots = dots.filter((d) => d.isDigit);
+  const attempts = Math.floor(dots.length * 0.23);
+  for (let i = 0; i < attempts; i++) {
+    const sx = DOT_R + 1 + Math.random() * (w - 2 * (DOT_R + 1));
+    const sy = DOT_R + 1 + Math.random() * (h - 2 * (DOT_R + 1));
+
+    let minDist = Infinity;
+    let nearestGroup = Math.floor(Math.random() * NUM_FRAMES);
+    for (const ld of letterDots) {
+      const d = Math.sqrt((sx - ld.x) ** 2 + (sy - ld.y) ** 2);
+      if (d < minDist) {
+        minDist = d;
+        nearestGroup = ld.frameGroup;
+      }
+    }
+
+    if (Math.random() > Math.min(1, minDist / 25)) continue;
+
+    dots.push({
+      x: sx,
+      y: sy,
+      radius: pickRadius(),
+      realColor: pick(SNOW_COLORS),
+      bgColor: pick(BG_SPOTLIGHT), // off-state stays slightly lit, reduces strobe contrast
+      isDigit: false,
+      isSnow: true,
+      frameGroup: (nearestGroup + NUM_FRAMES / 2) % NUM_FRAMES,
+    });
+  }
 }
 
 // Track canvas elements that have had transferControlToOffscreen() called.
@@ -239,7 +277,7 @@ export default function DotChallenge({
         // Show NUM_VISIBLE consecutive groups each frame (same density, faster cycling)
         const groupDist = (dot.frameGroup - frameIndex + NUM_FRAMES) % NUM_FRAMES;
         const visible = groupDist < NUM_VISIBLE;
-        const color = dot.isDigit && !visible ? dot.bgColor : dot.realColor;
+        const color = (dot.isDigit || dot.isSnow) && !visible ? dot.bgColor : dot.realColor;
 
         let batch = batches.get(color);
         if (!batch) {

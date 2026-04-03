@@ -28,6 +28,7 @@ const COLLECTION_NAME = `bio-handwriting-${EMBEDDING_VERSION}`;
 const INTERNAL_ERROR = { error: 'Internal server error' };
 const INVALID_JSON = { error: 'Invalid JSON' };
 const INVALID_API_KEY = { error: 'Invalid API key' };
+const INCORRECT_MSG = INCORRECT_MSG;
 
 // ── Server-side challenge generation ────────────────────────────────
 // Encryption key: generated per Lambda container cold-start. Persists for the
@@ -589,7 +590,7 @@ function validateChallengeAnswers(payload: BiometricPayload): {
   return {
     retry: jsonResponse(200, {
       retry: true,
-      message: 'Incorrect. Try again.',
+      message: INCORRECT_MSG,
     }),
     scores,
   };
@@ -720,7 +721,7 @@ function checkJa4Mismatch(ja4: string | undefined, ua: string): APIGatewayProxyR
   const mismatch = detectJa4UaMismatch(ja4, ua);
   if (!mismatch) return null;
   logger.warn('JA4/UA mismatch', { ja4, ua: ua.substring(0, 100), reason: mismatch });
-  return jsonResponse(200, { retry: true, message: 'Incorrect. Try again.' });
+  return jsonResponse(200, { retry: true, message: INCORRECT_MSG });
 }
 
 interface BotCheckResult {
@@ -756,9 +757,7 @@ async function runBotChecks(
       enforcing: PROBE_ENFORCE,
     });
     return {
-      block: PROBE_ENFORCE
-        ? jsonResponse(200, { retry: true, message: 'Incorrect. Try again.' })
-        : null,
+      block: PROBE_ENFORCE ? jsonResponse(200, { retry: true, message: INCORRECT_MSG }) : null,
       ja4,
       probeScore: probe.score,
       probeSignals: probe.signals,
@@ -859,7 +858,7 @@ async function handleClassify(event: APIGatewayProxyEventV2): Promise<APIGateway
     // Mask bot verdict — return same retry response as wrong answers
     // so bots can't distinguish detection from misrecognition
     if (result.verdict === 'bot') {
-      return jsonResponse(200, { retry: true, message: 'Incorrect. Try again.' });
+      return jsonResponse(200, { retry: true, message: INCORRECT_MSG });
     }
 
     const response: ClassifyResponse = { ...verdict, score };

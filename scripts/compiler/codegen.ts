@@ -644,6 +644,7 @@ export class CodeGenerator {
     throw new Error(`Unsupported call expression: ${callee.type}`);
   }
 
+  // eslint-disable-next-line complexity, sonarjs/cognitive-complexity -- method dispatch table; each case is a distinct op
   private compileMethodCall(member: Node, method: string, args: Node[], dst: number): number {
     const objReg = this.compileExpression((member as { object: Node }).object);
 
@@ -762,6 +763,7 @@ export class CodeGenerator {
     return dst;
   }
 
+  // eslint-disable-next-line complexity, sonarjs/cognitive-complexity -- builtin dispatch table; each case is a distinct op
   private compileBuiltinCall(name: string, args: Node[], dst: number): number {
     switch (name) {
       case 'parseInt': {
@@ -1162,6 +1164,7 @@ export class CodeGenerator {
       'JSON',
     ]);
 
+    // eslint-disable-next-line complexity, sonarjs/cognitive-complexity -- AST walk; each case handles a distinct node type
     const walk = (node: Node): void => {
       if (!node || typeof node !== 'object') return;
 
@@ -1235,6 +1238,7 @@ export class CodeGenerator {
   ): Set<string> {
     const free = new Set<string>();
 
+    // eslint-disable-next-line complexity, sonarjs/cognitive-complexity -- AST walk; each branch handles a distinct node type
     const walk = (node: Node): void => {
       if (!node || typeof node !== 'object') return;
 

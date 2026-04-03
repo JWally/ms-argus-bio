@@ -110,7 +110,7 @@ async function runAsync(vm: MiniVM): Promise<ExecutionResult> {
   return { value: reg[0], instructionsExecuted: ic };
 }
 
-// eslint-disable-next-line max-params -- VM hot path, object wrapper adds overhead
+// eslint-disable-next-line max-params, complexity, sonarjs/cognitive-complexity -- VM opcode dispatch; inherently a large switch
 function dispatch(
   vm: MiniVM,
   opcode: number,

@@ -48,6 +48,7 @@ interface AnimDot {
   on: string;
   off: string;
   isLetter: boolean;
+  isSnow: boolean;
   group: number;
 }
 
@@ -82,11 +83,56 @@ function buildAnimDots(pixels: Uint8Array, iw: number, ih: number, cw: number): 
         on: isLetter ? rndPick(LETTER_COLORS) : bg,
         off: bg,
         isLetter,
+        isSnow: false,
         group: Math.floor(Math.random() * NUM_FRAMES),
       });
     }
   }
+
+  addSnowDots(dots, cw);
   return dots;
+}
+
+/** Scatter out-of-phase snow dots — denser away from letter to preserve legibility. */
+function addSnowDots(dots: AnimDot[], cw: number): void {
+  const SNOW_ON_COLORS = ['#6366f1', '#7c3aed', '#60a5fa', '#7c3aed', '#4f46e5'];
+  const letterDots = dots.filter((d) => d.isLetter);
+  const attempts = Math.floor(dots.length * 0.23);
+  for (let i = 0; i < attempts; i++) {
+    const sx = DOT_R + 1 + Math.random() * (cw - 2 * (DOT_R + 1));
+    const sy = DOT_R + 1 + Math.random() * (CANVAS_H - 2 * (DOT_R + 1));
+
+    let minDist = Infinity;
+    let nearestGroup = Math.floor(Math.random() * NUM_FRAMES);
+    for (const ld of letterDots) {
+      const d = Math.sqrt((sx - ld.x) ** 2 + (sy - ld.y) ** 2);
+      if (d < minDist) {
+        minDist = d;
+        nearestGroup = ld.group;
+      }
+    }
+
+    if (Math.random() > Math.min(1, minDist / 25)) continue;
+
+    const sz = Math.random();
+    const r =
+      sz < 0.25
+        ? Math.max(0.8, 1 + Math.random() * 0.8)
+        : sz < 0.45
+          ? Math.max(0.8, 1.8 + Math.random() * 0.8)
+          : Math.max(0.8, DOT_R + (Math.random() - 0.5) * 1.2);
+
+    dots.push({
+      x: sx,
+      y: sy,
+      r,
+      on: rndPick(SNOW_ON_COLORS),
+      off: rndPick(BG_SPOTLIGHT), // off-state stays slightly lit, reduces strobe contrast
+      isLetter: false,
+      isSnow: true,
+      group: (nearestGroup + NUM_FRAMES / 2) % NUM_FRAMES,
+    });
+  }
 }
 
 function renderAnimFrame(
@@ -101,7 +147,7 @@ function renderAnimFrame(
     const jx = dot.x + (Math.random() - 0.5) * JITTER_PX;
     const jy = dot.y + (Math.random() - 0.5) * JITTER_PX;
     const gDist = (dot.group - frameIdx + NUM_FRAMES) % NUM_FRAMES;
-    const color = dot.isLetter && gDist < NUM_VISIBLE ? dot.on : dot.off;
+    const color = (dot.isLetter || dot.isSnow) && gDist < NUM_VISIBLE ? dot.on : dot.off;
     if (!batches.has(color)) batches.set(color, []);
     const r = dot.r;
     batches.get(color)!.push(jx - r, jy - r, r * 2, r * 2);
@@ -230,6 +276,7 @@ function respond(msg: Record<string, unknown>, transfer?: Transferable[]): void 
   }
 }
 
+// eslint-disable-next-line complexity -- message type dispatcher; each case is a distinct operation
 async function handleWorkerMessage(data: WorkerMessage): Promise<void> {
   const { id, type } = data;
 

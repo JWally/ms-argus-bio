@@ -252,11 +252,7 @@ function computePowerLaw(strokes: Stroke[]): { beta: number; r2: number; betaVar
   };
 }
 
-/** Tremor spectral ratio: power in 8-12 Hz / total power (1-20 Hz).
- *  Human physiological tremor peaks at 8-12 Hz.
- *  Bot Gaussian noise has flat spectrum. */
-function computeTremorRatio(strokes: Stroke[]): number {
-  // Collect timestamped speeds
+function collectSpeedSamples(strokes: Stroke[]): { t: number; v: number }[] {
   const samples: { t: number; v: number }[] = [];
   for (const stroke of strokes) {
     for (let i = 1; i < stroke.points.length; i++) {
@@ -264,12 +260,17 @@ function computeTremorRatio(strokes: Stroke[]): number {
       if (dt < 1) continue;
       const dx = stroke.points[i].x - stroke.points[i - 1].x;
       const dy = stroke.points[i].y - stroke.points[i - 1].y;
-      samples.push({
-        t: stroke.points[i].t,
-        v: Math.sqrt(dx * dx + dy * dy) / dt,
-      });
+      samples.push({ t: stroke.points[i].t, v: Math.sqrt(dx * dx + dy * dy) / dt });
     }
   }
+  return samples;
+}
+
+/** Tremor spectral ratio: power in 8-12 Hz / total power (1-20 Hz).
+ *  Human physiological tremor peaks at 8-12 Hz.
+ *  Bot Gaussian noise has flat spectrum. */
+function computeTremorRatio(strokes: Stroke[]): number {
+  const samples = collectSpeedSamples(strokes);
   if (samples.length < 20) return 0;
 
   // Resample to uniform 100 Hz via linear interpolation

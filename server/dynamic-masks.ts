@@ -191,8 +191,8 @@ export function generateDynamicMask(char: string): string {
 
   // Random rotation ±12°
   const angle = (Math.random() - 0.5) * 24 * (Math.PI / 180);
-  // Random scale 0.88–1.12
-  const scale = 0.88 + Math.random() * 0.24;
+  // Random scale 1.00–1.24
+  const scale = 1.0 + Math.random() * 0.24;
   // Random position jitter ±2px
   const dx = (Math.random() - 0.5) * 4;
   const dy = (Math.random() - 0.5) * 4;
@@ -225,8 +225,8 @@ export function generateDynamicImage(char: string): string {
 
   // Random rotation ±12°
   const angle = (Math.random() - 0.5) * 24 * (Math.PI / 180);
-  // Random scale 0.88–1.12
-  const scale = 0.88 + Math.random() * 0.24;
+  // Random scale 1.00–1.24
+  const scale = 1.0 + Math.random() * 0.24;
   // Random position jitter ±2px
   const dx = (Math.random() - 0.5) * 4;
   const dy = (Math.random() - 0.5) * 4;

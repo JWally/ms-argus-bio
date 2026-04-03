@@ -288,9 +288,10 @@ async function main() {
   console.log(`[profile] Summary written: ${path.join(outDir, 'summary.json')}`);
 
   // ── Print summary table ─────────────────────────────────────────────
-  console.log('\n═══════════════════════════════════════════');
+  const SEP = '═══════════════════════════════════════════';
+  console.log(`\n${SEP}`);
   console.log('  PERFORMANCE SUMMARY');
-  console.log('═══════════════════════════════════════════');
+  console.log(SEP);
 
   if (perfEntries.navigation) {
     console.log(`  TTFB:                ${perfEntries.navigation.ttfb}ms`);
@@ -321,7 +322,7 @@ async function main() {
     }
   }
 
-  console.log('═══════════════════════════════════════════\n');
+  console.log(`${SEP}\n`);
 
   await browser.close();
 }

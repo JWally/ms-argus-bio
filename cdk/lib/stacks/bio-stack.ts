@@ -34,6 +34,9 @@ export interface BioStackProps extends StackProps {
   rootDomain: string;
 }
 
+const INDEX_HTML = 'index.html';
+const INDEX_HTML_PATH = '/index.html';
+
 export class BioStack extends Stack {
   constructor(scope: Construct, id: string, props: BioStackProps) {
     super(scope, id, props);
@@ -486,18 +489,18 @@ export class BioStack extends Stack {
       ),
       domainNames: [siteDomainName],
       certificate: siteCertificate,
-      defaultRootObject: 'index.html',
+      defaultRootObject: INDEX_HTML,
       errorResponses: [
         {
           httpStatus: 403,
           responseHttpStatus: 200,
-          responsePagePath: '/index.html',
+          responsePagePath: INDEX_HTML_PATH,
           ttl: Duration.seconds(0),
         },
         {
           httpStatus: 404,
           responseHttpStatus: 200,
-          responsePagePath: '/index.html',
+          responsePagePath: INDEX_HTML_PATH,
           ttl: Duration.seconds(0),
         },
       ],
@@ -520,7 +523,7 @@ export class BioStack extends Stack {
       distribution: siteDistribution,
       distributionPaths: ['/*'],
       memoryLimit: 2096,
-      exclude: ['index.html'],
+      exclude: [INDEX_HTML],
       cacheControl: [s3deploy.CacheControl.fromString('public, max-age=31536000, immutable')],
     });
 
@@ -529,10 +532,10 @@ export class BioStack extends Stack {
       sources: [s3deploy.Source.asset(distPath)],
       destinationBucket: siteBucket,
       distribution: siteDistribution,
-      distributionPaths: ['/index.html'],
+      distributionPaths: [INDEX_HTML_PATH],
       memoryLimit: 512,
       exclude: ['*'],
-      include: ['index.html'],
+      include: [INDEX_HTML],
       cacheControl: [s3deploy.CacheControl.fromString('public, max-age=0, must-revalidate')],
     });
 
