@@ -3,6 +3,10 @@
 
 import type { BiometricPayload, Label } from './types';
 
+// Sentinel value returned when there isn't enough data to compute a meaningful CV.
+// Large enough that it never triggers a bot flag (all thresholds check < some threshold).
+const TIMING_CV_NO_DATA = 999;
+
 /**
  * Count the ratio of consecutive point pairs with near-zero time delta.
  * Real browser pointer events are dispatched at most once per frame (~8-16ms).
@@ -41,7 +45,7 @@ export function timingCV(payload: BiometricPayload): number {
       }
     }
   }
-  if (dts.length < 2) return 999; // Not enough data — don't flag
+  if (dts.length < 2) return TIMING_CV_NO_DATA;
   const avg = dts.reduce((a, b) => a + b, 0) / dts.length;
   if (avg === 0) return 0;
   const stddev = Math.sqrt(dts.reduce((s, v) => s + (v - avg) ** 2, 0) / dts.length);

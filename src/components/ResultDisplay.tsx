@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useIsMobile } from '../hooks/useIsMobile';
 import {
   TIER_LABELS,
   TIER_FAKE_COUNTS,
@@ -37,19 +37,6 @@ const TIER_ACCENT: Record<Tier, string> = {
   state: 'tier-state',
   country: 'tier-country',
 };
-
-const MOBILE_BREAKPOINT = 768;
-
-function useIsMobile() {
-  const [mobile, setMobile] = useState(() => window.innerWidth < MOBILE_BREAKPOINT);
-  useEffect(() => {
-    const mq = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`);
-    const handler = (e: MediaQueryListEvent) => setMobile(e.matches);
-    mq.addEventListener('change', handler);
-    return () => mq.removeEventListener('change', handler);
-  }, []);
-  return mobile;
-}
 
 export default function ResultDisplay({
   totalTimeMs,

@@ -23,6 +23,7 @@ import {
 import { useChallenge } from '../hooks/useChallenge';
 import { useVerdictFlow } from '../hooks/useVerdictFlow';
 import { MSG_ERROR, MSG_VERIFIED } from '../constants';
+import { formatTime } from '../components/Leaderboard';
 import '../App.css';
 
 type AppState = 'loading' | 'idle' | 'active' | 'complete';
@@ -42,14 +43,6 @@ interface FinalResult {
   timedOut: boolean;
   digits: DigitResult[];
   features: ReturnType<typeof computeFeatures>;
-}
-
-function formatTime(ms: number): string {
-  const totalSecs = Math.floor(ms / 1000);
-  const mins = Math.floor(totalSecs / 60);
-  const secs = totalSecs % 60;
-  const millis = Math.floor(ms % 1000);
-  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}.${String(millis).padStart(3, '0')}`;
 }
 
 // ── CaptchaPage ─────────────────────────────────────────────────────

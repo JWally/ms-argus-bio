@@ -28,7 +28,11 @@ const COLLECTION_NAME = `bio-handwriting-${EMBEDDING_VERSION}`;
 const INTERNAL_ERROR = { error: 'Internal server error' };
 const INVALID_JSON = { error: 'Invalid JSON' };
 const INVALID_API_KEY = { error: 'Invalid API key' };
-const INCORRECT_MSG = INCORRECT_MSG;
+const INCORRECT_MSG = 'Incorrect. Try again.';
+// Stop upserting new training vectors once collection reaches this size
+const TRAINING_CAP = 1000;
+// AES-256-GCM encrypted buffer minimum: 12 (IV) + 16 (auth tag) + 1 (min ciphertext)
+const MIN_ENCRYPTED_LEN = 29;
 
 // ── Server-side challenge generation ────────────────────────────────
 // Encryption key: generated per Lambda container cold-start. Persists for the
@@ -126,7 +130,7 @@ interface DecryptedChallenge {
 function decryptChallenge(challengeId: string, now: number): DecryptedChallenge | null {
   try {
     const buf = Buffer.from(challengeId, 'base64url');
-    if (buf.length < 29) return null; // 12 iv + 16 tag + 1 min ciphertext
+    if (buf.length < MIN_ENCRYPTED_LEN) return null;
 
     const iv = buf.subarray(0, 12);
     const tag = buf.subarray(12, 28);
@@ -307,9 +311,6 @@ async function decryptPayload(
 
   return null;
 }
-
-/** Stop upserting new training vectors once collection reaches this size */
-const TRAINING_CAP = 1000;
 
 // Module-scope singletons (reused across warm invocations)
 let qdrantClient: QdrantClient | null = null;
@@ -731,6 +732,15 @@ interface BotCheckResult {
   probeSignals: string[];
 }
 
+/** Extract the real client IP from CloudFront or X-Forwarded-For headers. */
+function parseClientIp(headers: APIGatewayProxyEventV2['headers']): string {
+  // CloudFront-Viewer-Address format: "1.2.3.4:port" — strip port
+  return (
+    (headers?.['cloudfront-viewer-address'] ?? '').split(':')[0] ||
+    (headers?.['x-forwarded-for'] ?? '').split(',')[0].trim()
+  );
+}
+
 /** Run all bot signal checks (JA4 + sigint probes). Returns block response or null. */
 async function runBotChecks(
   payload: BiometricPayload,
@@ -740,9 +750,7 @@ async function runBotChecks(
   const ja4Block = checkJa4Mismatch(ja4, event.headers?.['user-agent'] ?? '');
   if (ja4Block) return { block: ja4Block, ja4, probeScore: 0, probeSignals: [] };
 
-  const clientIp =
-    (event.headers?.['cloudfront-viewer-address'] ?? '').split(':')[0] ||
-    (event.headers?.['x-forwarded-for'] ?? '').split(',')[0].trim();
+  const clientIp = parseClientIp(event.headers);
   const probe = await redeemAndScore({
     tcpToken: payload.tcpProbeToken,
     h2Token: payload.h2ProbeToken,
