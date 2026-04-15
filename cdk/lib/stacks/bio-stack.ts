@@ -13,6 +13,7 @@ import * as logs from 'aws-cdk-lib/aws-logs';
 import * as ssm from 'aws-cdk-lib/aws-ssm';
 import * as apigatewayv2 from 'aws-cdk-lib/aws-apigatewayv2';
 import * as integrations from 'aws-cdk-lib/aws-apigatewayv2-integrations';
+import { HttpIamAuthorizer } from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as s3deploy from 'aws-cdk-lib/aws-s3-deployment';
@@ -323,28 +324,38 @@ export class BioStack extends Stack {
       integration: lambdaIntegration,
     });
 
+    // Admin routes — IAM-authorized. Destructive (flush/relabel) and
+    // data-exfil (scroll) endpoints must not be world-reachable. Callers
+    // sign with SigV4; only principals granted execute-api:Invoke on this
+    // API can reach them. See docs/admin-auth.md for invocation examples.
+    const adminAuthorizer = new HttpIamAuthorizer();
+
     httpApi.addRoutes({
       path: '/admin/flush',
       methods: [apigatewayv2.HttpMethod.POST],
       integration: lambdaIntegration,
+      authorizer: adminAuthorizer,
     });
 
     httpApi.addRoutes({
       path: '/admin/stats',
       methods: [apigatewayv2.HttpMethod.GET],
       integration: lambdaIntegration,
+      authorizer: adminAuthorizer,
     });
 
     httpApi.addRoutes({
       path: '/admin/scroll',
       methods: [apigatewayv2.HttpMethod.GET],
       integration: lambdaIntegration,
+      authorizer: adminAuthorizer,
     });
 
     httpApi.addRoutes({
       path: '/admin/relabel',
       methods: [apigatewayv2.HttpMethod.POST],
       integration: lambdaIntegration,
+      authorizer: adminAuthorizer,
     });
 
     // =========================================================================
